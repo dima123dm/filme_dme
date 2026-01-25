@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 from curl_cffi import requests as curl_requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -31,6 +32,7 @@ class RezkaClient:
         return False
 
     def _is_watched_check(self, element):
+        """Проверка статуса просмотра"""
         if not element: return False
         classes = element.get("class", [])
         if "watched" in classes or "b-watched" in classes: return True
@@ -40,6 +42,7 @@ class RezkaClient:
         return False
 
     def _parse_schedule_table(self, soup):
+        """Парсинг таблицы"""
         seasons = {}
         table = soup.find("table", class_="b-post__schedule_table")
         if not table: return {}
@@ -60,7 +63,7 @@ class RezkaClient:
                 match_ep = re.search(r'(\d+)\s*серия', text)
                 if match_ep: e_id = match_ep.group(1)
             
-            # Нормализуем номера (убираем ведущие нули: 01 -> 1)
+            # Нормализация (1 вместо 01)
             s_id = str(int(s_id))
             e_id = str(int(e_id))
 
@@ -88,58 +91,67 @@ class RezkaClient:
 
     def _parse_html_list(self, html_content):
         soup = BeautifulSoup(html_content, 'html.parser')
-        seasons = {}
         
-        # Ищем все элементы с атрибутом эпизода (универсально)
-        items = soup.find_all(attrs={"data-episode_id": True})
-        if not items:
-            items = soup.find_all("li", class_="b-simple_episode__item")
+        # Словарь для уникальных серий: key="s_id:e_id", value=EpisodeData
+        # Это предотвращает дубликаты при парсинге
+        unique_episodes = {}
+        
+        # Ищем контейнеры (ul)
+        containers = soup.find_all("ul", class_=lambda x: x and ("simple_episodes__list" in x or "b-simple_episodes__list" in x))
+        if not containers:
+            # Если контейнеров нет, ищем ID списков (например id="simple-episodes-list-1")
+            containers = soup.find_all("ul", id=re.compile(r"simple-episodes-list"))
+        
+        # Если всё равно нет, берем всё (для API ответов)
+        if not containers:
+            containers = [soup]
 
-        print(f"  📺 Найдено {len(items)} элементов (raw)")
+        items_found = 0
+        for cont in containers:
+            # Пытаемся определить сезон по ID контейнера (ul id="simple-episodes-list-2")
+            container_s_id = None
+            if hasattr(cont, 'get') and cont.get('id'):
+                match_s = re.search(r'list-(\d+)', cont.get('id'))
+                if match_s: container_s_id = match_s.group(1)
 
-        for item in items:
-            try:
-                # --- ИСПРАВЛЕНИЕ ОПРЕДЕЛЕНИЯ СЕЗОНА ---
-                s_id = item.get("data-season_id")
-                
-                # Если на самой серии нет номера сезона, ищем у родителя (ul)
-                if not s_id:
-                    parent = item.find_parent(attrs={"data-season_id": True})
-                    if parent:
-                        s_id = parent.get("data-season_id")
-                
-                # Если всё равно нет, пробуем найти активную вкладку
-                if not s_id:
-                    # Иногда это работает для активного списка
-                    parent_ul = item.find_parent("ul")
-                    if parent_ul and parent_ul.get("id"):
-                        # id="simple-episodes-list-2" -> сезон 2
-                        match_s = re.search(r'list-(\d+)', parent_ul.get("id"))
-                        if match_s: s_id = match_s.group(1)
+            li_items = cont.find_all("li", class_="b-simple_episode__item")
+            items_found += len(li_items)
 
-                if not s_id: s_id = "1" # Фолбек, если совсем ничего нет
-                
-                # Нормализуем
-                s_id = str(int(s_id))
-                e_id = str(int(item.get("data-episode_id")))
-                
-                title = item.text.strip()
-                global_id = item.get("data-id")
-                if not global_id:
-                    inner = item.find(attrs={"data-id": True})
-                    if inner: global_id = inner.get("data-id")
+            for item in li_items:
+                try:
+                    # 1. Определяем Сезон
+                    s_id = item.get("data-season_id")
+                    if not s_id: s_id = container_s_id # Берем от родителя
+                    if not s_id: s_id = "1" # Фолбек
+                    
+                    # 2. Определяем Серию
+                    e_id = item.get("data-episode_id")
+                    if not e_id: continue # Без номера серии нельзя
 
-                if not global_id: continue
+                    # Нормализация
+                    s_id = str(int(s_id))
+                    e_id = str(int(e_id))
 
-                is_watched = self._is_watched_check(item)
+                    title = item.text.strip()
+                    global_id = item.get("data-id")
+                    if not global_id:
+                        inner = item.find(attrs={"data-id": True})
+                        if inner: global_id = inner.get("data-id")
 
-                if s_id not in seasons: seasons[s_id] = []
-                seasons[s_id].append({
-                    "title": title, "episode": e_id, 
-                    "global_id": global_id, "watched": is_watched
-                })
-            except: continue
-        return seasons
+                    if not global_id: continue
+
+                    is_watched = self._is_watched_check(item)
+
+                    # Сохраняем (перезаписываем, если уже есть - это обновляет статус)
+                    unique_episodes[f"{s_id}:{e_id}"] = {
+                        "s_id": s_id,
+                        "title": title, "episode": e_id, 
+                        "global_id": global_id, "watched": is_watched
+                    }
+                except: continue
+        
+        print(f"  📺 Найдено {len(unique_episodes)} уникальных серий")
+        return unique_episodes
 
     def get_series_details(self, url):
         if not self.auth(): return {"error": "Auth failed"}
@@ -161,11 +173,13 @@ class RezkaClient:
             else: 
                 if soup.find(id="post_id"): post_id = soup.find(id="post_id").get("value")
 
-            # 1. Таблица
+            # 1. Таблица (Резерв)
             table_seasons = self._parse_schedule_table(soup)
             
-            # 2. Плеер
-            player_seasons = {}
+            # 2. Плеер (Собираем все серии в общую кучу)
+            # Мы используем плоский словарь all_unique_episodes, чтобы не дублировать
+            all_unique_episodes = {} 
+
             if post_id:
                 translator_id = None
                 match_tid = re.search(r'["\']translator_id["\']\s*:\s*(\d+)', html_text)
@@ -174,6 +188,7 @@ class RezkaClient:
                     active = soup.find(class_="b-translator__item active")
                     if active: translator_id = active.get("data-translator_id")
 
+                # Ищем сезоны
                 season_ids = re.findall(r'data-tab_id=["\'](\d+)["\']', html_text)
                 season_ids = sorted(list(set(season_ids)), key=lambda x: int(x) if x.isdigit() else 0)
                 season_ids = [s for s in season_ids if s.isdigit() and int(s) < 200]
@@ -193,59 +208,74 @@ class RezkaClient:
                             data = r_ajax.json()
                             if data.get('success'):
                                 html = data.get('episodes') or data.get('seasons')
-                                s_data = self._parse_html_list(html)
-                                for s, eps in s_data.items():
-                                    if s not in player_seasons: player_seasons[s] = []
-                                    player_seasons[s].extend(eps)
+                                # Парсим и сливаем в общий котел
+                                new_eps = self._parse_html_list(html)
+                                all_unique_episodes.update(new_eps)
                         except: pass
                 else:
-                    print("🚀 Качаю всё...")
+                    print("🚀 Качаю всё сразу...")
                     payload = {"id": post_id, "translator_id": translator_id or "238", "action": "get_episodes"}
                     try:
                         r_ajax = self.session.post(f"{self.origin}/ajax/get_cdn_series/", data=payload)
                         data = r_ajax.json()
                         if data.get('success'):
                             html = data.get('episodes') or data.get('seasons')
-                            player_seasons = self._parse_html_list(html)
+                            new_eps = self._parse_html_list(html)
+                            all_unique_episodes.update(new_eps)
                     except: pass
 
-            if not player_seasons:
+            # Фолбек на страницу
+            if not all_unique_episodes:
                 print("⚠️ API пуст, беру страницу...")
-                player_seasons = self._parse_html_list(html_text)
+                new_eps = self._parse_html_list(html_text)
+                all_unique_episodes.update(new_eps)
 
-            # 3. Объединение
-            final_seasons = player_seasons.copy()
-            if not final_seasons: final_seasons = table_seasons
-            elif table_seasons:
-                print("🔄 Объединение...")
+            # 3. Преобразуем плоский словарь обратно в структуру сезонов
+            final_seasons_dict = {}
+            
+            # Сначала заполняем из Плеера
+            for key, ep_data in all_unique_episodes.items():
+                s_id = ep_data['s_id']
+                if s_id not in final_seasons_dict: final_seasons_dict[s_id] = []
+                
+                # Удаляем служебное поле s_id перед добавлением
+                clean_ep = ep_data.copy()
+                del clean_ep['s_id']
+                final_seasons_dict[s_id].append(clean_ep)
+
+            # 4. Объединение с таблицей (Таблица главнее по статусу)
+            if table_seasons:
+                print("🔄 Объединение с таблицей...")
                 for s_id, t_eps in table_seasons.items():
-                    if s_id not in final_seasons:
-                        final_seasons[s_id] = t_eps
+                    if s_id not in final_seasons_dict:
+                        final_seasons_dict[s_id] = t_eps
                         continue
                     
                     for t_ep in t_eps:
                         found = False
-                        # ВАЖНО: сравниваем номера как строки, но очищенные
-                        target_ep = str(int(t_ep['episode']))
-                        
-                        for p_ep in final_seasons[s_id]:
-                            if str(int(p_ep['episode'])) == target_ep:
+                        for p_ep in final_seasons_dict[s_id]:
+                            # Сравниваем как строки
+                            if str(p_ep['episode']) == str(t_ep['episode']):
                                 found = True
                                 if t_ep['watched']: p_ep['watched'] = True
                                 if not p_ep['global_id']: p_ep['global_id'] = t_ep['global_id']
                                 break
                         if not found:
-                             final_seasons[s_id].append(t_ep)
+                             final_seasons_dict[s_id].append(t_ep)
 
-            # Удаляем пустые
-            final_seasons = {k: v for k, v in final_seasons.items() if v}
+            # Сортировка
+            sorted_seasons = {}
+            # Сортируем ключи сезонов (1, 2, 3...)
+            sorted_keys = sorted(final_seasons_dict.keys(), key=lambda x: int(x) if x.isdigit() else 999)
             
-            # Сортировка по номеру эпизода
-            for s in final_seasons:
-                final_seasons[s].sort(key=lambda x: int(x['episode']))
+            for s in sorted_keys:
+                eps = final_seasons_dict[s]
+                # Сортируем серии внутри сезона (1, 2, 3...)
+                eps.sort(key=lambda x: int(x['episode']) if x['episode'].isdigit() else 999)
+                sorted_seasons[s] = eps
 
-            if final_seasons:
-                return {"seasons": final_seasons, "poster": hq_poster, "post_id": post_id}
+            if sorted_seasons:
+                return {"seasons": sorted_seasons, "poster": hq_poster, "post_id": post_id}
             
             return {"error": "Нет серий", "poster": hq_poster, "post_id": post_id}
 
