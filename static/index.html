@@ -2,200 +2,292 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rezka WebApp</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Rezka</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--tg-theme-bg-color, #1c1c1e);
-            color: var(--tg-theme-text-color, #ffffff);
-            margin: 0; padding: 0;
-            padding-bottom: 80px; /* место для таббара */
-        }
-        /* Таббар внизу */
-        .tab-bar {
-            position: fixed; bottom: 0; left: 0; right: 0;
-            background: var(--tg-theme-secondary-bg-color, #2c2c2e);
-            display: flex; justify-content: space-around;
-            padding: 10px 0;
-            border-top: 1px solid #3a3a3c;
-        }
-        .tab-btn {
-            background: none; border: none;
-            color: var(--tg-theme-hint-color, #8e8e93);
-            font-size: 12px; display: flex; flex-direction: column; align-items: center;
-        }
-        .tab-btn.active { color: var(--tg-theme-button-color, #0a84ff); }
-        .tab-icon { font-size: 20px; margin-bottom: 4px; }
-
-        /* Список фильмов */
-        .grid {
-            display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
-            padding: 10px;
-        }
-        .card {
-            background: var(--tg-theme-secondary-bg-color, #2c2c2e);
-            border-radius: 10px; overflow: hidden;
-            position: relative;
-        }
-        .card img { width: 100%; height: auto; display: block; }
-        .card-info { padding: 8px; font-size: 12px; }
-        .card-title { font-weight: bold; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .card-status { color: #32d74b; font-size: 10px; }
-
-        /* Детали сериала (Модалка) */
-        #details-view {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: var(--tg-theme-bg-color, #1c1c1e);
-            transform: translateX(100%); transition: transform 0.3s;
-            z-index: 10; overflow-y: auto; padding: 15px;
-        }
-        #details-view.open { transform: translateX(0); }
-        .back-btn {
-            background: none; border: none; color: var(--tg-theme-link-color);
-            font-size: 16px; margin-bottom: 15px; cursor: pointer;
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--tg-theme-bg-color, #111);
+            color: var(--tg-theme-text-color, #fff);
+            margin: 0; padding: 0 0 80px 0;
+            -webkit-tap-highlight-color: transparent;
         }
         
-        /* Список серий */
-        .season-title { font-size: 18px; margin: 20px 0 10px; color: var(--tg-theme-text-color); }
-        .episode-row {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 12px;
-            background: var(--tg-theme-secondary-bg-color);
-            margin-bottom: 5px; border-radius: 8px;
+        /* Grid */
+        .grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+            padding: 10px;
         }
-        .episode-row.watched { opacity: 0.6; }
-        .checkbox {
-            width: 20px; height: 20px; border-radius: 50%;
-            border: 2px solid var(--tg-theme-hint-color);
-            display: flex; align-items: center; justify-content: center;
+        .card { position: relative; cursor: pointer; }
+        .card img {
+            width: 100%; aspect-ratio: 2/3; object-fit: cover;
+            border-radius: 8px; background: #222;
         }
-        .checkbox.checked {
-            background: #32d74b; border-color: #32d74b;
+        .card-status {
+            position: absolute; top: 5px; right: 5px;
+            background: rgba(0,0,0,0.7); color: #fff;
+            font-size: 10px; padding: 2px 4px; border-radius: 4px;
         }
-        .checkbox.checked::after {
-            content: '✓'; color: white; font-size: 12px;
+        .card-title {
+            font-size: 11px; margin-top: 4px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+
+        /* Search */
+        .search-box {
+            position: sticky; top: 0; z-index: 5;
+            padding: 10px; background: var(--tg-theme-bg-color);
+            display: none;
+        }
+        .search-box input {
+            width: 100%; padding: 10px; border-radius: 10px;
+            border: none; background: var(--tg-theme-secondary-bg-color, #222);
+            color: var(--tg-theme-text-color); outline: none; box-sizing: border-box;
+        }
+        .search-item {
+            display: flex; align-items: center; padding: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .search-item div { flex: 1; margin-left: 10px; }
+        .btn-add {
+            background: var(--tg-theme-button-color, #3390ec);
+            color: white; border: none; padding: 5px 10px;
+            border-radius: 6px; font-size: 12px; cursor: pointer;
+        }
+
+        /* Tabs */
+        .tab-bar {
+            position: fixed; bottom: 0; width: 100%;
+            background: var(--tg-theme-secondary-bg-color, #1c1c1d);
+            display: flex; border-top: 1px solid #333;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .tab-btn {
+            flex: 1; padding: 10px 0; background: none; border: none;
+            color: #888; font-size: 10px; display: flex; flex-direction: column; align-items: center;
+        }
+        .tab-btn.active { color: var(--tg-theme-button-color, #3390ec); }
+        .tab-icon { font-size: 20px; margin-bottom: 3px; }
+
+        /* Details Modal */
+        #details {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--tg-theme-bg-color); z-index: 100;
+            overflow-y: auto; transform: translateX(100%); transition: 0.3s;
+        }
+        #details.open { transform: translateX(0); }
+        
+        .hero { position: relative; height: 300px; }
+        .hero img { width: 100%; height: 100%; object-fit: cover; mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%); }
+        .hero-content {
+            position: absolute; bottom: 0; left: 0; padding: 20px;
+            width: 100%; box-sizing: border-box;
+            background: linear-gradient(to top, var(--tg-theme-bg-color), transparent);
+        }
+        .back-btn {
+            position: absolute; top: 15px; left: 15px; z-index: 10;
+            background: rgba(0,0,0,0.5); border-radius: 50%; width: 32px; height: 32px;
+            color: white; border: none; font-size: 18px;
+        }
+
+        .episodes-list { padding: 15px; }
+        .season-name { font-size: 18px; font-weight: bold; margin: 20px 0 10px; }
+        .ep-row {
+            display: flex; justify-content: space-between; padding: 12px 0;
+            border-bottom: 1px solid #333; align-items: center;
+        }
+        .ep-row.watched { opacity: 0.5; }
+        .check {
+            width: 24px; height: 24px; border-radius: 50%;
+            border: 2px solid #555; display: flex; align-items: center; justify-content: center;
+        }
+        .check.active { background: #4cd964; border-color: #4cd964; }
+        .check.active::after { content: '✓'; color: #000; font-weight: bold; font-size: 14px;}
+
     </style>
 </head>
 <body>
 
+    <div id="search-ui" class="search-box">
+        <input type="text" id="q" placeholder="Поиск сериалов..." oninput="doSearch(this.value)">
+        <div id="search-results"></div>
+    </div>
+
     <div id="grid" class="grid"></div>
 
     <div class="tab-bar">
-        <button class="tab-btn active" onclick="loadCategory('watching', this)">
-            <span class="tab-icon">▶</span> Смотрю
+        <button class="tab-btn active" onclick="switchTab('watching', this)">
+            <span class="tab-icon">▶</span>Смотрю
         </button>
-        <button class="tab-btn" onclick="loadCategory('later', this)">
-            <span class="tab-icon">🕒</span> Позже
+        <button class="tab-btn" onclick="switchTab('later', this)">
+            <span class="tab-icon">🕒</span>Позже
         </button>
-        <button class="tab-btn" onclick="loadCategory('watched', this)">
-            <span class="tab-icon">✅</span> Архив
+        <button class="tab-btn" onclick="switchTab('watched', this)">
+            <span class="tab-icon">📚</span>Архив
+        </button>
+        <button class="tab-btn" onclick="openSearch(this)">
+            <span class="tab-icon">🔍</span>Поиск
         </button>
     </div>
 
-    <div id="details-view">
-        <button class="back-btn" onclick="closeDetails()">← Назад</button>
-        <h2 id="det-title"></h2>
-        <div id="det-episodes"></div>
+    <div id="details">
+        <button class="back-btn" onclick="closeDetails()">✕</button>
+        <div class="hero">
+            <img id="det-img" src="">
+            <div class="hero-content">
+                <h1 id="det-title" style="margin:0; font-size:22px;"></h1>
+            </div>
+        </div>
+        <div id="det-list" class="episodes-list"></div>
     </div>
 
 <script>
     const tg = window.Telegram.WebApp;
-    tg.expand(); // На весь экран
+    tg.expand();
+    let currentTab = 'watching';
 
-    async function loadCategory(cat, btn) {
-        // Подсветка кнопок
+    async function switchTab(cat, btn) {
+        document.getElementById('search-ui').style.display = 'none';
+        document.getElementById('grid').style.display = 'grid';
+        
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         if(btn) btn.classList.add('active');
+        
+        currentTab = cat;
+        loadGrid(cat);
+    }
 
-        document.getElementById('grid').innerHTML = '<div style="text-align:center; grid-column:span 2">Загрузка...</div>';
-
+    async function loadGrid(cat) {
+        const grid = document.getElementById('grid');
+        grid.innerHTML = '<div style="grid-column:span 3; text-align:center; padding:20px; color:#666">Загрузка...</div>';
+        
         try {
             const res = await fetch(`/api/${cat}`);
             const data = await res.json();
-            
-            const grid = document.getElementById('grid');
             grid.innerHTML = '';
             
             data.forEach(item => {
-                const card = document.createElement('div');
-                card.className = 'card';
-                card.onclick = () => openDetails(item.url, item.title);
-                card.innerHTML = `
+                const div = document.createElement('div');
+                div.className = 'card';
+                div.onclick = () => openDetails(item.url, item.title, item.poster);
+                div.innerHTML = `
                     <img src="${item.poster}">
-                    <div class="card-info">
-                        <div class="card-title">${item.title}</div>
-                        <div class="card-status">${item.status}</div>
-                    </div>
+                    <div class="card-status">${item.status}</div>
+                    <div class="card-title">${item.title}</div>
                 `;
-                grid.appendChild(card);
+                grid.appendChild(div);
             });
-        } catch (e) {
-            document.getElementById('grid').innerText = "Ошибка загрузки";
-        }
+        } catch { grid.innerHTML = 'Ошибка загрузки'; }
     }
 
-    async function openDetails(url, title) {
-        document.getElementById('details-view').classList.add('open');
+    // SEARCH
+    function openSearch(btn) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('grid').style.display = 'none';
+        document.getElementById('search-ui').style.display = 'block';
+        document.getElementById('q').focus();
+    }
+
+    let searchTimer;
+    function doSearch(val) {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(async () => {
+            if(val.length < 3) return;
+            const res = await fetch(`/api/search?q=${encodeURIComponent(val)}`);
+            const data = await res.json();
+            const list = document.getElementById('search-results');
+            list.innerHTML = '';
+            
+            data.forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'search-item';
+                row.innerHTML = `
+                    <div style="margin:0; font-weight:bold">${item.title}</div>
+                    <button class="btn-add" onclick="addFav('${item.id}', 'watching')">+ Смотрю</button>
+                    <button class="btn-add" style="margin-left:5px; background:#555" onclick="addFav('${item.id}', 'later')">+ Позже</button>
+                `;
+                list.appendChild(row);
+            });
+        }, 500);
+    }
+
+    async function addFav(id, cat) {
+        tg.HapticFeedback.notificationOccurred('success');
+        await fetch('/api/add', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({post_id:id, category:cat})
+        });
+        alert('Добавлено!');
+    }
+
+    // DETAILS
+    async function openDetails(url, title, poster) {
+        const modal = document.getElementById('details');
+        modal.classList.add('open');
+        document.getElementById('det-img').src = poster; // Сначала показываем маленькую
         document.getElementById('det-title').innerText = title;
-        document.getElementById('det-episodes').innerHTML = 'Загрузка серий...';
+        document.getElementById('det-list').innerHTML = 'Загрузка серий...';
 
         const res = await fetch(`/api/details?url=${encodeURIComponent(url)}`);
         const data = await res.json();
 
+        if(data.poster) document.getElementById('det-img').src = data.poster; // Заменяем на HD
+
+        const list = document.getElementById('det-list');
+        list.innerHTML = '';
+
         if(data.error) {
-            document.getElementById('det-episodes').innerText = data.error;
+            list.innerHTML = `<div style="text-align:center; padding:20px;">${data.error}</div>`;
             return;
         }
 
-        const container = document.getElementById('det-episodes');
-        container.innerHTML = '';
+        Object.keys(data.seasons).forEach(s => {
+            const h = document.createElement('div');
+            h.className = 'season-name';
+            h.innerText = s + ' сезон';
+            list.appendChild(h);
 
-        // Проходим по сезонам (ключи словаря)
-        Object.keys(data.seasons).forEach(seasonNum => {
-            const h3 = document.createElement('h3');
-            h3.className = 'season-title';
-            h3.innerText = `${seasonNum} сезон`;
-            container.appendChild(h3);
-
-            data.seasons[seasonNum].forEach(ep => {
+            data.seasons[s].forEach(ep => {
                 const row = document.createElement('div');
-                row.className = `episode-row ${ep.watched ? 'watched' : ''}`;
+                row.className = `ep-row ${ep.watched ? 'watched' : ''}`;
                 row.innerHTML = `
                     <span>${ep.title}</span>
-                    <div class="checkbox ${ep.watched ? 'checked' : ''}" 
-                         onclick="toggleEp('${ep.global_id}', this)"></div>
+                    <div class="check ${ep.watched ? 'active' : ''}" 
+                         onclick="toggle('${ep.global_id}', this, document.querySelector('.ep-row'))"></div>
                 `;
-                container.appendChild(row);
+                // Хак: передаем ссылку на row чтобы менять опасити
+                row.querySelector('.check').onclick = function() { toggle(ep.global_id, this, row) };
+                list.appendChild(row);
             });
         });
     }
 
-    async function toggleEp(globalId, el) {
-        // Визуально меняем сразу
-        const isChecked = el.classList.contains('checked');
-        if(isChecked) el.classList.remove('checked');
-        else el.classList.add('checked');
-
-        // Шлем запрос на сервер
-        await fetch('/api/toggle', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({global_id: globalId})
-        });
-        
-        // Вибрация телефона при успехе
-        tg.HapticFeedback.impactOccurred('light');
-    }
-
     function closeDetails() {
-        document.getElementById('details-view').classList.remove('open');
+        document.getElementById('details').classList.remove('open');
     }
 
-    // Загружаем первую вкладку при старте
-    loadCategory('watching');
+    async function toggle(gid, btn, row) {
+        tg.HapticFeedback.impactOccurred('medium');
+        const isActive = btn.classList.contains('active');
+        
+        if(isActive) {
+            btn.classList.remove('active');
+            row.classList.remove('watched');
+        } else {
+            btn.classList.add('active');
+            row.classList.add('watched');
+        }
+
+        await fetch('/api/toggle', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({global_id:gid})
+        });
+    }
+
+    // Init
+    loadGrid('watching');
 </script>
 </body>
 </html>
