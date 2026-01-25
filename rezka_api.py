@@ -31,25 +31,16 @@ class RezkaClient:
         return False
 
     def _is_watched_check(self, tag):
-        """Проверяет класс watched везде (на элементе и внутри)"""
         if not tag: return False
-        
-        # 1. Прямой класс
         classes = tag.get("class", [])
-        if "watched" in classes or "b-watched" in classes:
-            return True
-            
-        # 2. Ищем иконку внутри
-        # <i class="watch-episode-action watched"> или <i class="b-ico">
+        if "watched" in classes or "b-watched" in classes: return True
         icon = tag.find(class_=lambda x: x and ("watch-episode-action" in x or "b-ico" in x))
         if icon:
             icon_classes = icon.get("class", [])
-            if "watched" in icon_classes or "b-watched" in icon_classes:
-                return True
+            if "watched" in icon_classes or "b-watched" in icon_classes: return True
         return False
 
     def _parse_schedule_table(self, soup):
-        """Парсит таблицу графика (дополнительный источник галочек)"""
         seasons = {}
         table = soup.find("table", class_="b-post__schedule_table")
         if not table: return {}
@@ -60,17 +51,24 @@ class RezkaClient:
             if not td_1: continue
             
             text = td_1.text.strip()
+            # Ищем "1 сезон 1 серия" или просто "1 серия" (если сезон 1)
+            s_id = "1"
+            e_id = "1"
+            
             match = re.search(r'(\d+)\s*сезон\s*(\d+)\s*серия', text)
-            if not match: continue
+            if match:
+                s_id = match.group(1)
+                e_id = match.group(2)
+            else:
+                # Бывает формат "15 серия" (для аниме или 1 сезона)
+                match_ep = re.search(r'(\d+)\s*серия', text)
+                if match_ep:
+                    e_id = match_ep.group(1)
             
-            s_id = match.group(1)
-            e_id = match.group(2)
             global_id = td_1.get("data-id")
-            
-            # Проверяем галочку в таблице
             is_watched = False
-            action_icon = tr.find(class_="watch-episode-action")
             
+            action_icon = tr.find(class_="watch-episode-action")
             if action_icon:
                 if action_icon.get("data-id"): global_id = action_icon.get("data-id")
                 if "watched" in action_icon.get("class", []): is_watched = True
@@ -78,14 +76,20 @@ class RezkaClient:
                 is_watched = True
 
             if s_id not in seasons: seasons[s_id] = []
-            seasons[s_id].append({
-                "title": text, "episode": e_id, 
-                "global_id": global_id, "watched": is_watched
-            })
+            
+            # Проверяем дубликаты в самой таблице
+            exists = False
+            for ep in seasons[s_id]:
+                if ep['episode'] == e_id: exists = True
+            
+            if not exists:
+                seasons[s_id].append({
+                    "title": text, "episode": e_id, 
+                    "global_id": global_id, "watched": is_watched
+                })
         return seasons
 
     def _parse_html_list(self, html_content):
-        """Парсит стандартный список серий"""
         soup = BeautifulSoup(html_content, 'html.parser')
         seasons = {}
         items = soup.find_all("li", class_="b-simple_episode__item")
@@ -96,7 +100,6 @@ class RezkaClient:
                 e_id = item.get("data-episode_id", "1")
                 title = item.text.strip()
                 global_id = item.get("data-id")
-                
                 if not global_id:
                     inner = item.find(attrs={"data-id": True})
                     if inner: global_id = inner.get("data-id")
@@ -118,28 +121,24 @@ class RezkaClient:
             r = self.session.get(url)
             soup = BeautifulSoup(r.text, 'html.parser')
             
-            # Постер
             hq_poster = ""
             side = soup.find(class_="b-sidecover")
             if side:
                 if side.find('a'): hq_poster = side.find('a').get('href')
                 elif side.find('img'): hq_poster = side.find('img').get('src')
 
-            # ID Поста
             post_id = None
             if soup.find(id="post_id"): post_id = soup.find(id="post_id").get("value")
             else:
                 match = re.search(r'["\']post_id["\']\s*:\s*(\d+)', r.text)
                 if match: post_id = match.group(1)
 
-            # === 1. ПАРСИМ ТАБЛИЦУ (для подстраховки) ===
+            # 1. ТАБЛИЦА
             table_seasons = self._parse_schedule_table(soup)
             
-            # === 2. ВСЕГДА ЗАПРАШИВАЕМ API (Чтобы получить ВСЕ сезоны) ===
+            # 2. ПЛЕЕР (API)
             player_seasons = {}
-            
             if post_id:
-                # Ищем ID озвучки
                 translator_id = None
                 active = soup.find(class_="b-translator__item active")
                 if active: translator_id = active.get("data-translator_id")
@@ -147,8 +146,7 @@ class RezkaClient:
                     match = re.search(r'["\']translator_id["\']\s*:\s*(\d+)', r.text)
                     if match: translator_id = match.group(1)
 
-                print(f"🚀 Запрашиваю ВСЕ сезоны через API (ID: {post_id}, Trans: {translator_id})...")
-                
+                print(f"🚀 API Request (ID: {post_id})...")
                 payload = {
                     "id": post_id, 
                     "translator_id": translator_id if translator_id else "238",
@@ -160,38 +158,54 @@ class RezkaClient:
                     if data.get('success'):
                         html = data.get('seasons') or data.get('episodes')
                         player_seasons = self._parse_html_list(html)
-                        print(f"✅ API вернул полную структуру: {len(player_seasons)} сезонов")
-                except Exception as e:
-                    print(f"⚠️ Ошибка API: {e}")
+                        print(f"✅ API OK: {len(player_seasons)} seasons")
+                except: pass
 
-            # Если API не сработал (например, фильм), берем то, что было на странице
             if not player_seasons:
-                print("⚠️ API пуст, парсим текущую страницу...")
+                print("⚠️ API Empty -> Fallback to Page")
                 player_seasons = self._parse_html_list(r.text)
 
-            # === 3. ОБЪЕДИНЯЕМ ТАБЛИЦУ И ПЛЕЕР ===
-            # Таблица часто содержит более точные галочки для новых серий
+            # 3. ОБЪЕДИНЕНИЕ (ИСПРАВЛЕННОЕ!)
             final_seasons = player_seasons.copy()
             
-            if table_seasons:
-                print("🔄 Синхронизация с таблицей графика...")
+            if not final_seasons:
+                final_seasons = table_seasons
+            elif table_seasons:
+                print("🔄 Merging Table Data...")
                 for s_id, t_eps in table_seasons.items():
-                    if s_id in final_seasons:
-                        for t_ep in t_eps:
-                            for p_ep in final_seasons[s_id]:
-                                if p_ep['episode'] == t_ep['episode']:
-                                    if t_ep['watched']: p_ep['watched'] = True
-                                    if not p_ep['global_id']: p_ep['global_id'] = t_ep['global_id']
+                    # ЕСЛИ СЕЗОНА НЕТ В ПЛЕЕРЕ - ДОБАВЛЯЕМ ЕГО!
+                    if s_id not in final_seasons:
+                        print(f"   + Добавляю {s_id} сезон из таблицы")
+                        final_seasons[s_id] = t_eps
+                        continue
 
+                    # Если сезон есть, проверяем серии
+                    for t_ep in t_eps:
+                        found = False
+                        for p_ep in final_seasons[s_id]:
+                            if p_ep['episode'] == t_ep['episode']:
+                                found = True
+                                if t_ep['watched']: p_ep['watched'] = True
+                                if not p_ep['global_id']: p_ep['global_id'] = t_ep['global_id']
+                                break
+                        
+                        # Если серии нет в плеере - добавляем
+                        if not found:
+                             final_seasons[s_id].append(t_ep)
+
+            # Сортировка (чтобы сезоны шли 1, 2, 3...)
+            # Python 3.7+ сохраняет порядок вставки, но лучше гарантировать
+            # К сожалению ключи - строки, но для JSON на фронте порядок объектов сохранится
+            
             if final_seasons:
                 return {"seasons": final_seasons, "poster": hq_poster, "post_id": post_id}
             
-            return {"error": "Это фильм или сериал еще не вышел", "poster": hq_poster, "post_id": post_id}
+            return {"error": "Фильм / Нет серий", "poster": hq_poster, "post_id": post_id}
 
         except Exception as e:
             return {"error": str(e)}
 
-    # ... Остальные методы без изменений ...
+    # ... Остальное ...
     def get_category_items(self, cat_id):
         if not self.auth(): return []
         try:
