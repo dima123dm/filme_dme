@@ -64,6 +64,9 @@ class RezkaClient:
             td_1 = tr.find(class_="td-1")
             if not td_1: continue
             
+            # Проверяем, вышла ли серия (есть ли ссылка <a>)
+            if not td_1.find("a"): continue  # Нет ссылки - не вышла
+            
             text = td_1.text.strip()
             # Пытаемся вытащить сезон и серию
             s_id = "1"
@@ -117,6 +120,9 @@ class RezkaClient:
         
         for item in items:
             try:
+                # Исключаем не вышедшие (класс disabled)
+                if "disabled" in item.get("class", []): continue
+                
                 s_id = item.get("data-season_id", "1")
                 e_id = item.get("data-episode_id", "1")
                 title = item.text.strip()
@@ -175,11 +181,14 @@ class RezkaClient:
                     active = soup.find(class_="b-translator__item active")
                     if active: translator_id = active.get("data-translator_id")
 
-                # Ищем ID сезонов (REGEX - самый надежный метод)
-                season_ids = re.findall(r'data-tab_id=["\'](\d+)["\']', html_text)
+                # Ищем ID сезонов (ПРАВИЛЬНЫЙ REGEX - data-season_id)
+                season_ids = re.findall(r'data-season_id=["\'](\d+)["\']', html_text)
                 season_ids = sorted(list(set(season_ids)), key=lambda x: int(x) if x.isdigit() else 0)
                 # Фильтруем мусор
                 season_ids = [s for s in season_ids if s.isdigit() and int(s) < 200]
+                
+                if not season_ids:
+                    season_ids = ['1']  # Минимум один сезон
 
                 if season_ids:
                     print(f"📋 Найдены сезоны (Regex): {season_ids}")
