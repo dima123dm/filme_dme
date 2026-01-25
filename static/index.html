@@ -3,109 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Rezka</title>
+    <title>Rezka App</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            background: var(--tg-theme-bg-color, #111);
-            color: var(--tg-theme-text-color, #fff);
-            margin: 0; padding: 0 0 80px 0;
-            -webkit-tap-highlight-color: transparent;
-        }
-        
-        /* Grid */
-        .grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
-            padding: 10px;
-        }
-        .card { position: relative; cursor: pointer; }
-        .card img {
-            width: 100%; aspect-ratio: 2/3; object-fit: cover;
-            border-radius: 8px; background: #222;
-        }
-        .card-status {
-            position: absolute; top: 5px; right: 5px;
-            background: rgba(0,0,0,0.7); color: #fff;
-            font-size: 10px; padding: 2px 4px; border-radius: 4px;
-        }
-        .card-title {
-            font-size: 11px; margin-top: 4px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-
-        /* Search */
-        .search-box {
-            position: sticky; top: 0; z-index: 5;
-            padding: 10px; background: var(--tg-theme-bg-color);
-            display: none;
-        }
-        .search-box input {
-            width: 100%; padding: 10px; border-radius: 10px;
-            border: none; background: var(--tg-theme-secondary-bg-color, #222);
-            color: var(--tg-theme-text-color); outline: none; box-sizing: border-box;
-        }
-        .search-item {
-            display: flex; align-items: center; padding: 10px;
-            border-bottom: 1px solid #333;
-        }
-        .search-item div { flex: 1; margin-left: 10px; }
-        .btn-add {
-            background: var(--tg-theme-button-color, #3390ec);
-            color: white; border: none; padding: 5px 10px;
-            border-radius: 6px; font-size: 12px; cursor: pointer;
-        }
-
-        /* Tabs */
-        .tab-bar {
-            position: fixed; bottom: 0; width: 100%;
-            background: var(--tg-theme-secondary-bg-color, #1c1c1d);
-            display: flex; border-top: 1px solid #333;
-            padding-bottom: env(safe-area-inset-bottom);
-        }
-        .tab-btn {
-            flex: 1; padding: 10px 0; background: none; border: none;
-            color: #888; font-size: 10px; display: flex; flex-direction: column; align-items: center;
-        }
-        .tab-btn.active { color: var(--tg-theme-button-color, #3390ec); }
-        .tab-icon { font-size: 20px; margin-bottom: 3px; }
-
-        /* Details Modal */
-        #details {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: var(--tg-theme-bg-color); z-index: 100;
-            overflow-y: auto; transform: translateX(100%); transition: 0.3s;
-        }
-        #details.open { transform: translateX(0); }
-        
-        .hero { position: relative; height: 300px; }
-        .hero img { width: 100%; height: 100%; object-fit: cover; mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%); }
-        .hero-content {
-            position: absolute; bottom: 0; left: 0; padding: 20px;
-            width: 100%; box-sizing: border-box;
-            background: linear-gradient(to top, var(--tg-theme-bg-color), transparent);
-        }
-        .back-btn {
-            position: absolute; top: 15px; left: 15px; z-index: 10;
-            background: rgba(0,0,0,0.5); border-radius: 50%; width: 32px; height: 32px;
-            color: white; border: none; font-size: 18px;
-        }
-
-        .episodes-list { padding: 15px; }
-        .season-name { font-size: 18px; font-weight: bold; margin: 20px 0 10px; }
-        .ep-row {
-            display: flex; justify-content: space-between; padding: 12px 0;
-            border-bottom: 1px solid #333; align-items: center;
-        }
-        .ep-row.watched { opacity: 0.5; }
-        .check {
-            width: 24px; height: 24px; border-radius: 50%;
-            border: 2px solid #555; display: flex; align-items: center; justify-content: center;
-        }
-        .check.active { background: #4cd964; border-color: #4cd964; }
-        .check.active::after { content: '✓'; color: #000; font-weight: bold; font-size: 14px;}
-
-    </style>
+    <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
 
@@ -116,6 +16,16 @@
 
     <div id="grid" class="grid"></div>
 
+    <div id="details">
+        <button class="back-btn" onclick="closeDetails()">✕</button>
+        <div class="hero">
+            <div class="hero-gradient"></div>
+            <img id="det-img" src="">
+            <div class="hero-title" id="det-title"></div>
+        </div>
+        <div id="det-list" class="episodes-list"></div>
+    </div>
+
     <div class="tab-bar">
         <button class="tab-btn active" onclick="switchTab('watching', this)">
             <span class="tab-icon">▶</span>Смотрю
@@ -124,170 +34,13 @@
             <span class="tab-icon">🕒</span>Позже
         </button>
         <button class="tab-btn" onclick="switchTab('watched', this)">
-            <span class="tab-icon">📚</span>Архив
+            <span class="tab-icon">✅</span>Архив
         </button>
         <button class="tab-btn" onclick="openSearch(this)">
             <span class="tab-icon">🔍</span>Поиск
         </button>
     </div>
 
-    <div id="details">
-        <button class="back-btn" onclick="closeDetails()">✕</button>
-        <div class="hero">
-            <img id="det-img" src="">
-            <div class="hero-content">
-                <h1 id="det-title" style="margin:0; font-size:22px;"></h1>
-            </div>
-        </div>
-        <div id="det-list" class="episodes-list"></div>
-    </div>
-
-<script>
-    const tg = window.Telegram.WebApp;
-    tg.expand();
-    let currentTab = 'watching';
-
-    async function switchTab(cat, btn) {
-        document.getElementById('search-ui').style.display = 'none';
-        document.getElementById('grid').style.display = 'grid';
-        
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        if(btn) btn.classList.add('active');
-        
-        currentTab = cat;
-        loadGrid(cat);
-    }
-
-    async function loadGrid(cat) {
-        const grid = document.getElementById('grid');
-        grid.innerHTML = '<div style="grid-column:span 3; text-align:center; padding:20px; color:#666">Загрузка...</div>';
-        
-        try {
-            const res = await fetch(`/api/${cat}`);
-            const data = await res.json();
-            grid.innerHTML = '';
-            
-            data.forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'card';
-                div.onclick = () => openDetails(item.url, item.title, item.poster);
-                div.innerHTML = `
-                    <img src="${item.poster}">
-                    <div class="card-status">${item.status}</div>
-                    <div class="card-title">${item.title}</div>
-                `;
-                grid.appendChild(div);
-            });
-        } catch { grid.innerHTML = 'Ошибка загрузки'; }
-    }
-
-    // SEARCH
-    function openSearch(btn) {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById('grid').style.display = 'none';
-        document.getElementById('search-ui').style.display = 'block';
-        document.getElementById('q').focus();
-    }
-
-    let searchTimer;
-    function doSearch(val) {
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(async () => {
-            if(val.length < 3) return;
-            const res = await fetch(`/api/search?q=${encodeURIComponent(val)}`);
-            const data = await res.json();
-            const list = document.getElementById('search-results');
-            list.innerHTML = '';
-            
-            data.forEach(item => {
-                const row = document.createElement('div');
-                row.className = 'search-item';
-                row.innerHTML = `
-                    <div style="margin:0; font-weight:bold">${item.title}</div>
-                    <button class="btn-add" onclick="addFav('${item.id}', 'watching')">+ Смотрю</button>
-                    <button class="btn-add" style="margin-left:5px; background:#555" onclick="addFav('${item.id}', 'later')">+ Позже</button>
-                `;
-                list.appendChild(row);
-            });
-        }, 500);
-    }
-
-    async function addFav(id, cat) {
-        tg.HapticFeedback.notificationOccurred('success');
-        await fetch('/api/add', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({post_id:id, category:cat})
-        });
-        alert('Добавлено!');
-    }
-
-    // DETAILS
-    async function openDetails(url, title, poster) {
-        const modal = document.getElementById('details');
-        modal.classList.add('open');
-        document.getElementById('det-img').src = poster; // Сначала показываем маленькую
-        document.getElementById('det-title').innerText = title;
-        document.getElementById('det-list').innerHTML = 'Загрузка серий...';
-
-        const res = await fetch(`/api/details?url=${encodeURIComponent(url)}`);
-        const data = await res.json();
-
-        if(data.poster) document.getElementById('det-img').src = data.poster; // Заменяем на HD
-
-        const list = document.getElementById('det-list');
-        list.innerHTML = '';
-
-        if(data.error) {
-            list.innerHTML = `<div style="text-align:center; padding:20px;">${data.error}</div>`;
-            return;
-        }
-
-        Object.keys(data.seasons).forEach(s => {
-            const h = document.createElement('div');
-            h.className = 'season-name';
-            h.innerText = s + ' сезон';
-            list.appendChild(h);
-
-            data.seasons[s].forEach(ep => {
-                const row = document.createElement('div');
-                row.className = `ep-row ${ep.watched ? 'watched' : ''}`;
-                row.innerHTML = `
-                    <span>${ep.title}</span>
-                    <div class="check ${ep.watched ? 'active' : ''}" 
-                         onclick="toggle('${ep.global_id}', this, document.querySelector('.ep-row'))"></div>
-                `;
-                // Хак: передаем ссылку на row чтобы менять опасити
-                row.querySelector('.check').onclick = function() { toggle(ep.global_id, this, row) };
-                list.appendChild(row);
-            });
-        });
-    }
-
-    function closeDetails() {
-        document.getElementById('details').classList.remove('open');
-    }
-
-    async function toggle(gid, btn, row) {
-        tg.HapticFeedback.impactOccurred('medium');
-        const isActive = btn.classList.contains('active');
-        
-        if(isActive) {
-            btn.classList.remove('active');
-            row.classList.remove('watched');
-        } else {
-            btn.classList.add('active');
-            row.classList.add('watched');
-        }
-
-        await fetch('/api/toggle', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({global_id:gid})
-        });
-    }
-
-    // Init
-    loadGrid('watching');
-</script>
+    <script src="static/script.js"></script>
 </body>
 </html>
