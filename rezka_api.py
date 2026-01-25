@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from curl_cffi import requests as curl_requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -17,56 +18,61 @@ class RezkaClient:
     def auth(self):
         if self.is_logged_in: return True
         try:
-            print("🔑 Auth...")
             headers = {"X-Requested-With": "XMLHttpRequest"}
             r = self.session.post(f"{self.origin}/ajax/login/", 
                                 data={"login_name": self.login, "login_password": self.password},
                                 headers=headers)
             if r.json().get('success'):
                 self.is_logged_in = True
-                print("✅ Auth Success")
                 return True
         except: pass
         return False
 
-    def _check_watched_status(self, item_tag):
-        """Проверяет 3 способа маркировки просмотренного"""
-        classes = item_tag.get("class", [])
-        
-        # Способ 1: Класс у li
-        if "watched" in classes or "b-watched" in classes:
-            return True
-            
-        # Способ 2: Внутренний чекбокс (ищем span/div с классом b-ico)
-        # Часто бывает <span class="b-ico"></span> если просмотрено
-        # Или <i class="b-icon-watched"></i>
-        if item_tag.find(class_="b-ico") or item_tag.find(class_="b-icon-watched"):
-            return True
-
-        return False
-
     def _parse_episodes_from_html(self, soup):
         seasons = {}
+        # Ищем все элементы списка
         items = soup.find_all("li", class_="b-simple_episode__item")
         
         if not items: return None
 
         for item in items:
             try:
+                # 1. Базовые параметры
                 s_id = item.get("data-season_id", "1")
                 e_id = item.get("data-episode_id", "1")
-                global_id = item.get("data-id") 
                 title = item.text.strip()
                 
-                # Используем новую проверку
-                is_watched = self._check_watched_status(item)
+                # 2. Ищем Глобальный ID и Статус просмотра
+                # Сначала пробуем на самом LI
+                global_id = item.get("data-id")
+                is_watched = "watched" in item.get("class", []) or "b-watched" in item.get("class", [])
+
+                # 3. ЕСЛИ НЕ НАШЛИ -> Ищем во внутреннем теге <i> (твой случай!)
+                # <i class="watch-episode-action watched" data-id="...">
+                action_icon = item.find(class_="watch-episode-action")
+                
+                if action_icon:
+                    # Если ID не было на LI, берем с иконки
+                    if not global_id:
+                        global_id = action_icon.get("data-id")
+                    
+                    # Проверяем статус watched на иконке
+                    if "watched" in action_icon.get("class", []):
+                        is_watched = True
+
+                # Еще один вариант (старый дизайн): <span class="b-ico">
+                if not is_watched and item.find(class_="b-ico"):
+                    is_watched = True
 
                 if s_id not in seasons: seasons[s_id] = []
                 seasons[s_id].append({
                     "title": title, "episode": e_id, 
                     "global_id": global_id, "watched": is_watched
                 })
-            except: continue
+            except Exception as e:
+                print(f"Error parsing item: {e}")
+                continue
+        
         return seasons
 
     def get_category_items(self, cat_id):
