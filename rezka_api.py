@@ -1,6 +1,6 @@
 import os
 import re
-import json
+import time
 from curl_cffi import requests as curl_requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -41,6 +41,7 @@ class RezkaClient:
         return False
 
     def _parse_schedule_table(self, soup):
+        """Парсит таблицу (всегда полезно как резерв)"""
         seasons = {}
         table = soup.find("table", class_="b-post__schedule_table")
         if not table: return {}
@@ -51,7 +52,7 @@ class RezkaClient:
             if not td_1: continue
             
             text = td_1.text.strip()
-            # Ищем "1 сезон 1 серия" или просто "1 серия" (если сезон 1)
+            # Пробуем форматы: "2 сезон 15 серия" или "15 серия"
             s_id = "1"
             e_id = "1"
             
@@ -60,7 +61,6 @@ class RezkaClient:
                 s_id = match.group(1)
                 e_id = match.group(2)
             else:
-                # Бывает формат "15 серия" (для аниме или 1 сезона)
                 match_ep = re.search(r'(\d+)\s*серия', text)
                 if match_ep:
                     e_id = match_ep.group(1)
@@ -77,7 +77,7 @@ class RezkaClient:
 
             if s_id not in seasons: seasons[s_id] = []
             
-            # Проверяем дубликаты в самой таблице
+            # Избегаем дублей
             exists = False
             for ep in seasons[s_id]:
                 if ep['episode'] == e_id: exists = True
@@ -133,12 +133,14 @@ class RezkaClient:
                 match = re.search(r'["\']post_id["\']\s*:\s*(\d+)', r.text)
                 if match: post_id = match.group(1)
 
-            # 1. ТАБЛИЦА
+            # 1. ТАБЛИЦА (Резерв)
             table_seasons = self._parse_schedule_table(soup)
             
-            # 2. ПЛЕЕР (API)
+            # 2. УМНЫЙ ПАРСИНГ СЕЗОНОВ (НОВОЕ!)
             player_seasons = {}
+            
             if post_id:
+                # Ищем ID озвучки
                 translator_id = None
                 active = soup.find(class_="b-translator__item active")
                 if active: translator_id = active.get("data-translator_id")
@@ -146,40 +148,69 @@ class RezkaClient:
                     match = re.search(r'["\']translator_id["\']\s*:\s*(\d+)', r.text)
                     if match: translator_id = match.group(1)
 
-                print(f"🚀 API Request (ID: {post_id})...")
-                payload = {
-                    "id": post_id, 
-                    "translator_id": translator_id if translator_id else "238",
-                    "action": "get_episodes"
-                }
-                try:
-                    r_ajax = self.session.post(f"{self.origin}/ajax/get_cdn_series/", data=payload)
-                    data = r_ajax.json()
-                    if data.get('success'):
-                        html = data.get('seasons') or data.get('episodes')
-                        player_seasons = self._parse_html_list(html)
-                        print(f"✅ API OK: {len(player_seasons)} seasons")
-                except: pass
+                # --- НОВАЯ ЛОГИКА: ИЩЕМ ВКЛАДКИ СЕЗОНОВ ---
+                season_tabs = soup.select(".b-simple_episode__seasons-item")
+                
+                # Если вкладки есть - проходим по каждой!
+                if season_tabs:
+                    print(f"📋 Найдено {len(season_tabs)} сезонов. Скачиваю каждый...")
+                    for tab in season_tabs:
+                        season_id = tab.get("data-tab_id")
+                        if not season_id: continue
+                        
+                        print(f"   ⬇ Скачиваю сезон {season_id}...")
+                        payload = {
+                            "id": post_id, 
+                            "translator_id": translator_id if translator_id else "238",
+                            "season": season_id, # Явно запрашиваем сезон
+                            "action": "get_episodes"
+                        }
+                        try:
+                            r_ajax = self.session.post(f"{self.origin}/ajax/get_cdn_series/", data=payload)
+                            if r_ajax.json().get('success'):
+                                html = r_ajax.json().get('seasons') or r_ajax.json().get('episodes')
+                                season_data = self._parse_html_list(html)
+                                # Объединяем словари
+                                for s, eps in season_data.items():
+                                    if s not in player_seasons: player_seasons[s] = []
+                                    player_seasons[s].extend(eps)
+                        except: pass
+                        # Небольшая пауза, чтобы не дудосить
+                        time.sleep(0.1) 
+                        
+                else:
+                    # Вкладок нет (1 сезон или фильм). Пробуем один общий запрос.
+                    print("🚀 Вкладок нет. Запрашиваю всё сразу...")
+                    payload = {
+                        "id": post_id, 
+                        "translator_id": translator_id if translator_id else "238",
+                        "action": "get_episodes"
+                    }
+                    try:
+                        r_ajax = self.session.post(f"{self.origin}/ajax/get_cdn_series/", data=payload)
+                        data = r_ajax.json()
+                        if data.get('success'):
+                            html = data.get('seasons') or data.get('episodes')
+                            player_seasons = self._parse_html_list(html)
+                    except: pass
 
+            # Фолбек на страницу
             if not player_seasons:
-                print("⚠️ API Empty -> Fallback to Page")
+                print("⚠️ API пуст, беру текущую страницу...")
                 player_seasons = self._parse_html_list(r.text)
 
-            # 3. ОБЪЕДИНЕНИЕ (ИСПРАВЛЕННОЕ!)
+            # 3. ОБЪЕДИНЕНИЕ С ТАБЛИЦЕЙ
             final_seasons = player_seasons.copy()
             
             if not final_seasons:
                 final_seasons = table_seasons
             elif table_seasons:
-                print("🔄 Merging Table Data...")
+                print("🔄 Синхронизация с таблицей...")
                 for s_id, t_eps in table_seasons.items():
-                    # ЕСЛИ СЕЗОНА НЕТ В ПЛЕЕРЕ - ДОБАВЛЯЕМ ЕГО!
                     if s_id not in final_seasons:
-                        print(f"   + Добавляю {s_id} сезон из таблицы")
                         final_seasons[s_id] = t_eps
                         continue
 
-                    # Если сезон есть, проверяем серии
                     for t_ep in t_eps:
                         found = False
                         for p_ep in final_seasons[s_id]:
@@ -188,24 +219,18 @@ class RezkaClient:
                                 if t_ep['watched']: p_ep['watched'] = True
                                 if not p_ep['global_id']: p_ep['global_id'] = t_ep['global_id']
                                 break
-                        
-                        # Если серии нет в плеере - добавляем
                         if not found:
                              final_seasons[s_id].append(t_ep)
 
-            # Сортировка (чтобы сезоны шли 1, 2, 3...)
-            # Python 3.7+ сохраняет порядок вставки, но лучше гарантировать
-            # К сожалению ключи - строки, но для JSON на фронте порядок объектов сохранится
-            
             if final_seasons:
                 return {"seasons": final_seasons, "poster": hq_poster, "post_id": post_id}
             
-            return {"error": "Фильм / Нет серий", "poster": hq_poster, "post_id": post_id}
+            return {"error": "Нет серий", "poster": hq_poster, "post_id": post_id}
 
         except Exception as e:
             return {"error": str(e)}
 
-    # ... Остальное ...
+    # Методы без изменений...
     def get_category_items(self, cat_id):
         if not self.auth(): return []
         try:
