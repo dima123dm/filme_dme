@@ -6,25 +6,37 @@
     
     console.log('[Rezka] Plugin loading...');
     
-    function MyRezkaComponent(object) {
+    // ========================================
+    // Компонент для каждой категории
+    // ========================================
+    function RezkaCategory(category) {
         var comp = {};
-        comp.html = $('<div></div>');
+        comp.html = $('<div class="rezka-category"></div>');
         var scroll = null;
         var cards = [];
+        var items_data = [];
+        var isModalOpen = false;
+        
+        var endpoints = {
+            'watching': '/api/watching',
+            'later': '/api/later',
+            'watched': '/api/watched'
+        };
         
         comp.create = function() {
-            console.log('[Rezka] Creating component');
+            console.log('[Rezka] Creating category:', category);
             
             var loader = $('<div class="broadcast__text">Загрузка...</div>');
             comp.html.append(loader);
             
             $.ajax({
-                url: MY_API_URL + '/api/watching',
+                url: MY_API_URL + endpoints[category],
                 method: 'GET',
                 dataType: 'json',
                 timeout: 15000,
                 success: function(items) {
                     loader.remove();
+                    items_data = items;
                     
                     if (items && items.length > 0) {
                         console.log('[Rezka] Loaded:', items.length, 'items');
@@ -48,20 +60,24 @@
         comp.renderItems = function(items) {
             console.log('[Rezka] Rendering', items.length, 'cards');
             
-            // Создаем scroll
+            // Создаем scroll для прокрутки
             scroll = new Lampa.Scroll({
                 horizontal: false,
                 step: 250
             });
             
-            // Создаем grid с твоим стилем
+            // Wrapper для правильного скролла
+            var wrapper = $('<div class="rezka-wrapper"></div>');
+            
+            // Grid с карточками
             var grid = $('<div class="rezka-grid"></div>');
             grid.css({
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
                 gap: '20px',
                 padding: '20px',
-                width: '100%'
+                width: '100%',
+                boxSizing: 'border-box'
             });
             
             items.forEach(function(item) {
@@ -70,7 +86,8 @@
                 grid.append(card);
             });
             
-            scroll.append(grid);
+            wrapper.append(grid);
+            scroll.append(wrapper);
             comp.html.append(scroll.render());
             
             comp.start();
@@ -83,22 +100,17 @@
             var year = yearMatch ? yearMatch[1] : '';
             
             var titleNoYear = rawTitle.replace(/\s*\(\d{4}\)/, '').trim();
-            
             var parts = titleNoYear.split('/');
             var titleRu = parts[0].trim();
             var titleEn = parts[1] ? parts[1].trim() : '';
-            
             var titleRuClean = titleRu.split(':')[0].trim();
             
             var isTv = /\/series\/|\/cartoons\//.test(item.url || '');
             var mediaType = isTv ? 'tv' : 'movie';
             
-            var posterUrl = '';
-            if (item.poster) {
-                posterUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster);
-            }
+            var posterUrl = item.poster ? MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster) : '';
             
-            // Карточка с твоим стилем
+            // Карточка
             var card = $('<div class="rezka-card selector"></div>');
             card.css({
                 position: 'relative',
@@ -123,7 +135,7 @@
             
             // Статус
             if (item.status) {
-                var statusBadge = $('<div class="rezka-status"></div>');
+                var statusBadge = $('<div></div>');
                 statusBadge.text(item.status);
                 statusBadge.css({
                     position: 'absolute',
@@ -144,7 +156,7 @@
             card.append(posterDiv);
             
             // Название
-            var titleDiv = $('<div class="rezka-title"></div>');
+            var titleDiv = $('<div></div>');
             titleDiv.text(titleRu);
             titleDiv.css({
                 padding: '10px 8px',
@@ -161,26 +173,81 @@
             
             card.append(titleDiv);
             
+            // Долгое нажатие
+            var longPressTimer = null;
+            var longPressStage = 0;
+            
             // Hover эффекты
             card.on('hover:focus', function() {
+                // Убираем подсветку со всех карточек
+                $('.rezka-card').css({
+                    'transform': 'scale(1)',
+                    'box-shadow': 'none',
+                    'z-index': '1'
+                });
+                
+                // Подсвечиваем текущую
                 card.css({
                     'transform': 'scale(1.05)',
                     'box-shadow': '0 8px 20px rgba(255,255,255,0.3)',
                     'z-index': '10'
                 });
+                
+                // Начинаем отсчет долгого нажатия
+                longPressStage = 0;
+                longPressTimer = setTimeout(function() {
+                    longPressStage = 1;
+                    Lampa.Noty.show('📂 Меню управления');
+                    
+                    // Второй уровень - для сериалов
+                    if (isTv) {
+                        longPressTimer = setTimeout(function() {
+                            longPressStage = 2;
+                            Lampa.Noty.show('📺 Выставление серий');
+                        }, 1500);
+                    }
+                }, 1000);
             });
             
             card.on('hover:blur', function() {
+                // Убираем подсветку
                 card.css({
                     'transform': 'scale(1)',
                     'box-shadow': 'none',
                     'z-index': '1'
                 });
+                
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+                
+                // Показываем соответствующее меню
+                if (longPressStage === 1) {
+                    comp.showManageModal(item);
+                } else if (longPressStage === 2 && isTv) {
+                    comp.showEpisodesModal(item);
+                }
+                
+                longPressStage = 0;
             });
             
-            // Клик
+            // Обычный клик
             card.on('hover:enter', function(e) {
                 if (e) e.preventDefault();
+                
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+                
+                if (longPressStage > 0) {
+                    longPressStage = 0;
+                    return;
+                }
+                
+                if (isModalOpen) return;
+                
                 console.log('[Rezka] Opening:', titleRu);
                 comp.openCard(titleRuClean, titleEn, year, mediaType);
             });
@@ -188,6 +255,7 @@
             return card;
         };
         
+        // Открытие карточки в TMDB
         comp.openCard = function(titleRu, titleEn, year, mediaType) {
             Lampa.Loading.start(function() {});
             
@@ -231,13 +299,226 @@
             });
         };
         
+        // Меню управления фильмом
+        comp.showManageModal = function(item) {
+            if (isModalOpen) return;
+            isModalOpen = true;
+            
+            var items = [];
+            
+            if (category !== 'watching') {
+                items.push({ title: '▶ В Смотрю', value: 'move_watching' });
+            }
+            if (category !== 'later') {
+                items.push({ title: '⏳ В Позже', value: 'move_later' });
+            }
+            if (category !== 'watched') {
+                items.push({ title: '✅ В Архив', value: 'move_watched' });
+            }
+            
+            items.push({ title: '🗑️ Удалить', value: 'delete' });
+            
+            Lampa.Select.show({
+                title: 'Управление',
+                items: items,
+                onSelect: function(selected) {
+                    isModalOpen = false;
+                    comp.handleAction(selected.value, item);
+                },
+                onBack: function() {
+                    isModalOpen = false;
+                }
+            });
+        };
+        
+        // Меню выставления серий
+        comp.showEpisodesModal = function(item) {
+            if (isModalOpen) return;
+            isModalOpen = true;
+            
+            Lampa.Loading.start(function() {});
+            
+            $.ajax({
+                url: MY_API_URL + '/api/details',
+                data: { url: item.url },
+                success: function(details) {
+                    Lampa.Loading.stop();
+                    
+                    if (!details || !details.seasons) {
+                        Lampa.Noty.show('Ошибка загрузки серий');
+                        isModalOpen = false;
+                        return;
+                    }
+                    
+                    var seasons = Object.keys(details.seasons).sort(function(a, b) {
+                        return parseInt(a) - parseInt(b);
+                    });
+                    
+                    var seasonItems = seasons.map(function(s) {
+                        var eps = details.seasons[s];
+                        var watched = eps.filter(function(e) { return e.watched; }).length;
+                        return {
+                            title: 'Сезон ' + s + ' (' + watched + '/' + eps.length + ')',
+                            value: s,
+                            episodes: eps
+                        };
+                    });
+                    
+                    Lampa.Select.show({
+                        title: 'Выберите сезон',
+                        items: seasonItems,
+                        onSelect: function(sel) {
+                            comp.showEpisodesList(item, sel.value, sel.episodes);
+                        },
+                        onBack: function() {
+                            isModalOpen = false;
+                        }
+                    });
+                },
+                error: function() {
+                    Lampa.Loading.stop();
+                    Lampa.Noty.show('Ошибка связи');
+                    isModalOpen = false;
+                }
+            });
+        };
+        
+        comp.showEpisodesList = function(item, season, episodes) {
+            var items = [
+                { title: '✅ Отметить все', value: 'all', season: season }
+            ];
+            
+            episodes.sort(function(a, b) {
+                return parseInt(a.episode) - parseInt(b.episode);
+            }).forEach(function(ep) {
+                items.push({
+                    title: (ep.watched ? '✅' : '▫️') + ' Серия ' + ep.episode,
+                    value: ep.episode,
+                    season: season,
+                    watched: ep.watched
+                });
+            });
+            
+            Lampa.Select.show({
+                title: 'Серии (Сезон ' + season + ')',
+                items: items,
+                onSelect: function(sel) {
+                    if (sel.value === 'all') {
+                        comp.markAllEpisodes(item, sel.season);
+                    } else {
+                        comp.markEpisode(item, sel.season, sel.value);
+                    }
+                },
+                onBack: function() {
+                    isModalOpen = false;
+                }
+            });
+        };
+        
+        comp.markEpisode = function(item, season, episode) {
+            Lampa.Loading.start(function() {});
+            
+            $.ajax({
+                url: MY_API_URL + '/api/episode/mark',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ url: item.url, season: season, episode: episode }),
+                success: function(res) {
+                    Lampa.Loading.stop();
+                    Lampa.Noty.show(res.success ? '✅ Обновлено' : '❌ Ошибка');
+                    isModalOpen = false;
+                    if (res.success) comp.reload();
+                },
+                error: function() {
+                    Lampa.Loading.stop();
+                    Lampa.Noty.show('❌ Ошибка связи');
+                    isModalOpen = false;
+                }
+            });
+        };
+        
+        comp.markAllEpisodes = function(item, season) {
+            Lampa.Loading.start(function() {});
+            
+            $.ajax({
+                url: MY_API_URL + '/api/episode/mark-range',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ url: item.url, season: season, from_episode: 1, to_episode: 999 }),
+                success: function(res) {
+                    Lampa.Loading.stop();
+                    Lampa.Noty.show(res.success ? '✅ Отмечено: ' + res.marked : '❌ Ошибка');
+                    isModalOpen = false;
+                    if (res.success) comp.reload();
+                },
+                error: function() {
+                    Lampa.Loading.stop();
+                    Lampa.Noty.show('❌ Ошибка связи');
+                    isModalOpen = false;
+                }
+            });
+        };
+        
+        comp.handleAction = function(action, item) {
+            var postId = item.url.match(/\/(\d+)-/);
+            postId = postId ? postId[1] : null;
+            
+            if (!postId) {
+                Lampa.Noty.show('❌ Ошибка ID');
+                return;
+            }
+            
+            Lampa.Loading.start(function() {});
+            
+            if (action === 'delete') {
+                $.ajax({
+                    url: MY_API_URL + '/api/delete',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ post_id: postId, category: category }),
+                    success: function(res) {
+                        Lampa.Loading.stop();
+                        Lampa.Noty.show(res.success ? '✅ Удалено' : '❌ Ошибка');
+                        if (res.success) comp.reload();
+                    },
+                    error: function() {
+                        Lampa.Loading.stop();
+                        Lampa.Noty.show('❌ Ошибка связи');
+                    }
+                });
+            } else if (action.startsWith('move_')) {
+                var toCategory = action.replace('move_', '');
+                $.ajax({
+                    url: MY_API_URL + '/api/move',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ post_id: postId, from_category: category, to_category: toCategory }),
+                    success: function(res) {
+                        Lampa.Loading.stop();
+                        Lampa.Noty.show(res.success ? '✅ Перемещено' : '❌ Ошибка');
+                        if (res.success) comp.reload();
+                    },
+                    error: function() {
+                        Lampa.Loading.stop();
+                        Lampa.Noty.show('❌ Ошибка связи');
+                    }
+                });
+            }
+        };
+        
+        comp.reload = function() {
+            Lampa.Activity.replace({
+                component: 'rezka_' + category,
+                page: 1
+            });
+        };
+        
         comp.start = function() {
-            console.log('[Rezka] Start - activating controller');
+            console.log('[Rezka] Start controller');
             
             Lampa.Controller.add('content', {
                 toggle: function() {
                     Lampa.Controller.collectionSet(comp.html);
-                    
                     if (cards.length > 0) {
                         Lampa.Controller.collectionFocus(cards[0], comp.html);
                     }
@@ -273,16 +554,12 @@
         };
         
         comp.pause = function() {
-            console.log('[Rezka] Pause');
             Lampa.Controller.clear();
         };
         
-        comp.stop = function() {
-            console.log('[Rezka] Stop');
-        };
+        comp.stop = function() {};
         
         comp.destroy = function() {
-            console.log('[Rezka] Destroy');
             Lampa.Controller.clear();
             if (scroll) scroll.destroy();
             comp.html.remove();
@@ -296,47 +573,62 @@
         return comp;
     }
     
-    // Регистрация
+    // Регистрация компонентов
     function init() {
-        console.log('[Rezka] Init called');
+        console.log('[Rezka] Init');
         
         if (!window.Lampa) {
             console.error('[Rezka] Lampa not found!');
             return;
         }
         
-        Lampa.Component.add('my_rezka', MyRezkaComponent);
-        console.log('[Rezka] Component registered');
+        // Регистрируем три компонента
+        Lampa.Component.add('rezka_watching', function(obj) {
+            return RezkaCategory('watching');
+        });
         
-        // Добавляем в меню
+        Lampa.Component.add('rezka_later', function(obj) {
+            return RezkaCategory('later');
+        });
+        
+        Lampa.Component.add('rezka_watched', function(obj) {
+            return RezkaCategory('watched');
+        });
+        
+        console.log('[Rezka] Components registered');
+        
+        // Добавляем три пункта в меню
         setTimeout(function() {
-            if ($('[data-action="my_rezka_open"]').length === 0) {
-                var menuItem = $(
-                    '<li class="menu__item selector" data-action="my_rezka_open">' +
-                    '<div class="menu__ico">' +
-                    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
-                    '<path d="M12 2L2 7L12 12L22 7L12 2Z"/>' +
-                    '<path d="M2 17L12 22L22 17"/>' +
-                    '<path d="M2 12L12 17L22 12"/>' +
-                    '</svg>' +
-                    '</div>' +
-                    '<div class="menu__text">Rezka</div>' +
-                    '</li>'
-                );
+            var menu = $('.menu .menu__list').eq(0);
+            
+            if ($('[data-action="rezka_watching"]').length === 0) {
+                var items = [
+                    { action: 'rezka_watching', component: 'rezka_watching', icon: '▶', text: 'Смотрю' },
+                    { action: 'rezka_later', component: 'rezka_later', icon: '⏳', text: 'Позже' },
+                    { action: 'rezka_watched', component: 'rezka_watched', icon: '✅', text: 'Архив' }
+                ];
                 
-                $('.menu .menu__list').eq(0).append(menuItem);
-                
-                menuItem.on('hover:enter', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    console.log('[Rezka] Menu activated');
-                    Lampa.Activity.push({
-                        component: 'my_rezka',
-                        page: 1
+                items.forEach(function(item) {
+                    var menuItem = $(
+                        '<li class="menu__item selector" data-action="' + item.action + '">' +
+                        '<div class="menu__ico">' + item.icon + '</div>' +
+                        '<div class="menu__text">' + item.text + '</div>' +
+                        '</li>'
+                    );
+                    
+                    menuItem.on('hover:enter', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        Lampa.Activity.push({
+                            component: item.component,
+                            page: 1
+                        });
                     });
+                    
+                    menu.append(menuItem);
                 });
                 
-                console.log('[Rezka] Menu item added');
+                console.log('[Rezka] Menu items added');
             }
         }, 1000);
     }
