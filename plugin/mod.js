@@ -4,7 +4,7 @@
     var MY_API_URL = 'http://filme.64.188.67.85.sslip.io:8080';
     var TMDB_API_KEY = '4ef0d7355d9ffb5151e987764708ce96';
 
-    console.log('[Rezka] Plugin loading...');
+    console.log('[Rezka] Plugin loading full version...');
 
     function RezkaCategory(category) {
         var comp = {};
@@ -12,8 +12,8 @@
         var scroll_wrapper = null;
         var isModalOpen = false;
         var last_item = null;
-        var all_items = []; // Храним загруженные данные
-        var current_sort = 'added_desc'; // Сортировка по умолчанию (новые добавленные)
+        var all_items = []; 
+        var current_sort = 'added_desc'; 
 
         var endpoints = {
             'watching': '/api/watching',
@@ -33,15 +33,16 @@
                 success: function(items) {
                     loader.remove();
                     if (items && items.length > 0) {
-                        all_items = items; // Сохраняем для сортировки
-                        comp.renderList(); // Рисуем список
+                        all_items = items;
+                        comp.renderList();
                     } else {
                         comp.html.append('<div class="broadcast__text">Список пуст</div>');
                     }
                 },
                 error: function(err) {
+                    console.error('Error loading rezka:', err);
                     loader.remove();
-                    comp.html.append('<div class="broadcast__text">Ошибка загрузки</div>');
+                    comp.html.append('<div class="broadcast__text">Ошибка загрузки данных</div>');
                 }
             });
             return comp.html;
@@ -49,16 +50,9 @@
 
         // --- ЛОГИКА СОРТИРОВКИ ---
         comp.sortItems = function(items, type) {
-            var sorted = items.slice(); // Копия массива
-            
-            if (type === 'added_desc') {
-                // По умолчанию (как пришло с сервера, обычно новые сверху)
-                return sorted;
-            }
-            if (type === 'added_asc') {
-                // Старые добавленные сверху
-                return sorted.reverse();
-            }
+            var sorted = items.slice();
+            if (type === 'added_desc') return sorted;
+            if (type === 'added_asc') return sorted.reverse();
             if (type === 'year_desc' || type === 'year_asc') {
                 sorted.sort(function(a, b) {
                     var ya = parseInt((a.title.match(/\((\d{4})\)/) || [])[1] || 0);
@@ -68,9 +62,7 @@
                 return sorted;
             }
             if (type === 'title') {
-                sorted.sort(function(a, b) {
-                    return a.title.localeCompare(b.title);
-                });
+                sorted.sort(function(a, b) { return a.title.localeCompare(b.title); });
                 return sorted;
             }
             return sorted;
@@ -78,12 +70,13 @@
 
         // --- ОТРИСОВКА ИНТЕРФЕЙСА ---
         comp.renderList = function() {
-            // Очищаем контейнер перед перерисовкой (при смене сортировки)
             comp.html.empty();
 
+            // Создаем контейнер для скролла
             scroll_wrapper = $('<div class="rezka-scroll-wrapper"></div>');
             scroll_wrapper.css({
-                'overflow-y': 'hidden',
+                'overflow-y': 'hidden', // Скрываем нативный скроллбар
+                'overflow-x': 'hidden',
                 'height': '100%',
                 'width': '100%',
                 'position': 'relative',
@@ -91,34 +84,42 @@
                 'flex-direction': 'column'
             });
 
-            // 1. Кнопка Сортировки (теперь это часть скролла)
-            var header = $('<div class="rezka-header" style="padding: 15px 20px 5px 20px; flex-shrink: 0;"></div>');
+            // 1. Хедер с кнопкой сортировки
+            var header = $('<div class="rezka-header"></div>');
+            header.css({
+                'padding': '15px 20px 5px 20px',
+                'flex-shrink': '0',
+                'text-align': 'right',
+                'z-index': '11'
+            });
+
             var sortBtn = $('<div class="selector rezka-sort-btn">⇅ Сортировка</div>');
-            
             sortBtn.css({
                 'display': 'inline-block',
                 'padding': '10px 20px',
-                'border-radius': '20px',
+                'border-radius': '8px',
                 'background': 'rgba(255,255,255,0.1)',
                 'font-size': '16px',
                 'cursor': 'pointer',
                 'transition': 'all 0.2s',
-                'border': '1px solid transparent'
+                'border': '2px solid transparent'
             });
 
-            // Логика кнопки сортировки
+            // События кнопки сортировки
             sortBtn.on('hover:enter', function() {
                 comp.showSortMenu();
             });
+            
             sortBtn.on('hover:focus', function() {
                 last_item = sortBtn;
                 $(this).css({
                     'background': '#fff',
                     'color': '#000',
                     'transform': 'scale(1.05)',
-                    'box-shadow': '0 0 10px rgba(255,255,255,0.5)'
+                    'box-shadow': '0 0 15px rgba(255,255,255,0.3)'
                 });
             });
+            
             sortBtn.on('hover:blur', function() {
                 $(this).css({
                     'background': 'rgba(255,255,255,0.1)',
@@ -149,16 +150,24 @@
             scroll_wrapper.append(grid);
             comp.html.append(scroll_wrapper);
 
+            // Запускаем контроллер
             comp.start();
 
             // Восстановление фокуса
             setTimeout(function() {
-                if (!last_item || !last_item.length || !$.contains(document.documentElement, last_item[0])) {
-                    // Если фокус потерян или это первый запуск - фокус на кнопку сортировки (она первая)
+                // Пытаемся найти первый фильм
+                var firstMovie = grid.find('.selector').first();
+                
+                if (firstMovie.length) {
+                    last_item = firstMovie;
+                    Lampa.Controller.collectionFocus(last_item, comp.html);
+                } else {
+                    // Если фильмов нет, фокус на сортировку
                     last_item = sortBtn;
+                    Lampa.Controller.collectionFocus(last_item, comp.html);
                 }
                 Lampa.Controller.toggle('rezka');
-            }, 100);
+            }, 150);
         };
 
         // --- МЕНЮ СОРТИРОВКИ ---
@@ -181,7 +190,7 @@
                 onSelect: function(a) {
                     current_sort = a.value;
                     isModalOpen = false;
-                    comp.renderList(); // Перерисовываем список
+                    comp.renderList();
                 },
                 onBack: function() {
                     isModalOpen = false;
@@ -228,9 +237,15 @@
             if (item.status) {
                 var badge = $('<div></div>').text(item.status);
                 badge.css({
-                    'position': 'absolute', 'bottom': '0', 'left': '0', 'right': '0',
-                    'padding': '4px', 'background': 'rgba(0,0,0,0.8)', 'color': '#fff',
-                    'font-size': '10px', 'text-align': 'center'
+                    'position': 'absolute',
+                    'bottom': '0',
+                    'left': '0',
+                    'right': '0',
+                    'padding': '4px',
+                    'background': 'rgba(0,0,0,0.8)',
+                    'color': '#fff',
+                    'font-size': '10px',
+                    'text-align': 'center'
                 });
                 poster.append(badge);
             }
@@ -239,33 +254,40 @@
 
             var title = $('<div></div>').text(titleRu);
             title.css({
-                'padding': '8px', 'font-size': '12px', 'color': '#fff', 'text-align': 'center',
-                'min-height': '40px', 'display': 'flex', 'align-items': 'center', 'justify-content': 'center',
+                'padding': '8px',
+                'font-size': '12px',
+                'color': '#fff',
+                'text-align': 'center',
+                'min-height': '40px',
+                'display': 'flex',
+                'align-items': 'center',
+                'justify-content': 'center',
                 'line-height': '1.2'
             });
             card.append(title);
 
             card.data('item', item);
 
-            // Обработка фокуса и скролла
+            // ЛОГИКА ФОКУСА
             card.on('hover:focus', function() {
                 last_item = $(this);
                 
                 $('.rezka-card').css({'transform': 'scale(1)', 'box-shadow': 'none', 'z-index': '1'});
                 $(this).css({'transform': 'scale(1.05)', 'box-shadow': '0 8px 20px rgba(0,0,0,0.5)', 'z-index': '10'});
 
-                // Ручной скролл к активному элементу
+                // --- РУЧНОЙ СКРОЛЛ (Без Script Error) ---
                 if (scroll_wrapper) {
                     var cardTop = $(this).position().top;
                     var containerHeight = scroll_wrapper.height();
                     var scrollTop = scroll_wrapper.scrollTop();
-                    
-                    // Если ушли вниз
+                    var headerHeight = 60; // Высота хедера с сортировкой
+
+                    // Карточка ушла вниз
                     if (cardTop > containerHeight - 180) {
                         scroll_wrapper.stop().animate({ scrollTop: scrollTop + 250 }, 200);
                     }
-                    // Если ушли вверх (под кнопку сортировки)
-                    if (cardTop < 80) {
+                    // Карточка ушла вверх (под хедер)
+                    if (cardTop < headerHeight + 20) {
                         scroll_wrapper.stop().animate({ scrollTop: scrollTop - 250 }, 200);
                     }
                 }
@@ -281,6 +303,7 @@
                 comp.search(titleRuClean, titleEn, year, mediaType);
             });
 
+            // Долгое нажатие - МЕНЮ
             card.on('hover:long', function() {
                 comp.menu(item);
             });
@@ -288,15 +311,14 @@
             return card;
         };
 
-        // --- ПОИСК ---
+        // --- ЛОГИКА ПОИСКА ---
         comp.search = function(titleRu, titleEn, year, mediaType) {
             Lampa.Loading.start(function() {});
-            
             var allResults = [];
             var seenIds = {};
             var queries = [];
             
-            // Если ручной поиск (один аргумент)
+            // Если передан один аргумент - это ручной поиск по имени (из меню)
             if (arguments.length === 1 && typeof titleRu === 'string') {
                 queries.push(titleRu);
                 mediaType = 'multi'; 
@@ -307,13 +329,13 @@
             }
 
             var completed = 0;
-            if (queries.length === 0) { Lampa.Loading.stop(); Lampa.Noty.show('Пустой запрос'); return; }
+            if (queries.length === 0) { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка поиска'); return; }
 
             function checkComplete() {
                 completed++;
                 if (completed === queries.length) {
                     Lampa.Loading.stop();
-                    if (allResults.length === 0) { Lampa.Noty.show('Ничего не найдено'); return; }
+                    if (allResults.length === 0) { Lampa.Noty.show('Не найдено'); return; }
                     
                     var exactMatch = null;
                     if (year && mediaType !== 'multi') {
@@ -330,9 +352,7 @@
 
             queries.forEach(function(q) {
                 var url = 'https://api.themoviedb.org/3/search/' + mediaType + '?api_key=' + TMDB_API_KEY + '&language=ru-RU&query=' + encodeURIComponent(q);
-                if (year && mediaType !== 'multi') {
-                    url += (mediaType === 'tv' ? '&first_air_date_year=' : '&year=') + year;
-                }
+                if (year && mediaType !== 'multi') url += (mediaType === 'tv' ? '&first_air_date_year=' : '&year=') + year;
                 
                 $.ajax({
                     url: url, timeout: 10000,
@@ -389,28 +409,28 @@
             var isTv = /\/series\/|\/cartoons\//.test(item.url || '');
             var items = [];
             
-            // 1. Ручной поиск (НОВАЯ КНОПКА)
-            items.push({ title: '🔍 Поиск TMDB (Исправить)', value: 'manual_search' });
+            // 1. Поиск в TMDB (исправление)
+            items.push({ title: '🔍 Найти в TMDB', value: 'manual_search' });
 
-            // 2. Серии
             if (isTv) items.push({ title: '📝 Отметки серий', value: 'episodes' });
-
-            // 3. Категории
             if (category !== 'watching') items.push({ title: '▶ В Смотрю', value: 'move_watching' });
             if (category !== 'later')    items.push({ title: '⏳ В Позже', value: 'move_later'    });
             if (category !== 'watched') items.push({ title: '✅ В Архив', value: 'move_watched'  });
-            
-            // 4. Удаление
             items.push({ title: '🗑️ Удалить', value: 'delete' });
 
             Lampa.Select.show({
                 title: 'Управление', items: items,
                 onSelect: function(sel) {
                     isModalOpen = false;
-                    Lampa.Controller.toggle('rezka'); 
+                    // Сразу возвращаем контроллер, чтобы не зависало
+                    Lampa.Controller.toggle('rezka');
                     
                     if (sel.value === 'episodes') comp.episodes(item);
-                    else if (sel.value === 'manual_search') comp.manualSearchInput(item);
+                    else if (sel.value === 'manual_search') {
+                        // Чистим название от года и английского и запускаем поиск
+                        var ruName = item.title.replace(/\s*\(\d{4}\)/, '').split('/')[0].trim();
+                        comp.search(ruName);
+                    }
                     else comp.action(sel.value, item);
                 },
                 onBack: function() { 
@@ -420,20 +440,7 @@
             });
         };
 
-        // Ввод названия для ручного поиска
-        comp.manualSearchInput = function(item) {
-            Lampa.Input.edit({
-                title: 'Поиск в TMDB',
-                value: item.title,
-                free: true,
-                nosave: true
-            }, function(newQuery) {
-                if (newQuery) comp.search(newQuery);
-                else Lampa.Controller.toggle('rezka');
-            });
-        };
-
-        // --- РАБОТА С СЕРИЯМИ ---
+        // --- СЕРИИ ---
         comp.episodes = function(item) {
             if (isModalOpen) return; isModalOpen = true;
             Lampa.Loading.start(function() {});
@@ -454,24 +461,13 @@
                         var w = eps.filter(function(e) { return e.watched; }).length;
                         return { title: 'Сезон ' + s + ' (' + w + '/' + eps.length + ')', value: s, episodes: eps };
                     });
-                    
                     Lampa.Select.show({
                         title: 'Выберите сезон', items: items,
-                        onSelect: function(sel) { 
-                            comp.episodeList(item, sel.value, sel.episodes); 
-                        },
-                        onBack: function() { 
-                            isModalOpen = false; 
-                            Lampa.Controller.toggle('rezka'); 
-                        }
+                        onSelect: function(sel) { comp.episodeList(item, sel.value, sel.episodes); },
+                        onBack: function() { isModalOpen = false; Lampa.Controller.toggle('rezka'); }
                     });
                 },
-                error: function() { 
-                    Lampa.Loading.stop(); 
-                    Lampa.Noty.show('Ошибка'); 
-                    isModalOpen = false; 
-                    Lampa.Controller.toggle('rezka');
-                }
+                error: function() { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка'); isModalOpen = false; Lampa.Controller.toggle('rezka'); }
             });
         };
 
@@ -490,10 +486,7 @@
                     if (sel.value === 'all') comp.markAll(item, sel.season);
                     else comp.markOne(item, sel.season, sel.value);
                 },
-                onBack: function() { 
-                    isModalOpen = false; 
-                    Lampa.Controller.toggle('rezka'); 
-                }
+                onBack: function() { isModalOpen = false; Lampa.Controller.toggle('rezka'); }
             });
         };
 
@@ -552,7 +545,7 @@
             Lampa.Activity.replace({ component: 'rezka_' + category, page: 1 });
         };
 
-        // --- КОНТРОЛЛЕР ---
+        // --- ГЛАВНЫЙ КОНТРОЛЛЕР ---
         comp.start = function() {
             Lampa.Controller.add('rezka', {
                 toggle: function() {
@@ -560,8 +553,23 @@
                     Lampa.Controller.collectionFocus(last_item, comp.html);
                 },
                 up: function() {
-                    if (Navigator.canmove('up')) Navigator.move('up');
-                    else Lampa.Controller.toggle('head');
+                    // Если фокус на кнопке сортировки -> уходим в меню Лампы
+                    if (last_item && last_item.hasClass('rezka-sort-btn')) {
+                        Lampa.Controller.toggle('head');
+                        return;
+                    }
+                    
+                    if (Navigator.canmove('up')) {
+                        Navigator.move('up');
+                    } else {
+                        // Если вверх нельзя (первый ряд фильмов), то принудительно ставим фокус на Сортировку
+                        var sortBtn = comp.html.find('.rezka-sort-btn');
+                        if (sortBtn.length) {
+                            Navigator.focus(sortBtn);
+                        } else {
+                            Lampa.Controller.toggle('head');
+                        }
+                    }
                 },
                 down: function() {
                     if (Navigator.canmove('down')) Navigator.move('down');
@@ -581,6 +589,7 @@
             Lampa.Controller.toggle('rezka');
         };
 
+        // Исправление бага "Назад": жесткое восстановление контроллера
         comp.onResume = function() {
             Lampa.Controller.toggle('rezka');
         };
@@ -625,6 +634,7 @@
             });
         }, 1000);
 
+        // Глобальный слушатель для гарантии восстановления фокуса
         Lampa.Listener.follow('activity', function(e) {
             if (e.type === 'active' && e.component.indexOf('rezka_') === 0) {
                 Lampa.Controller.toggle('rezka');
