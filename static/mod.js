@@ -3,7 +3,7 @@
 
     // ВАШ API
     var MY_API_URL = 'http://filme.64.188.67.85.sslip.io:8080';
-    var TMDB_API_KEY = '4ef0d7355d9ffb5151e987764708ce96'; // Публичный ключ TMDB
+    var TMDB_API_KEY = '4ef0d7355d9ffb5151e987764708ce96';
 
     function MyRezkaComponent(object) {
         var comp = {};
@@ -79,7 +79,7 @@
         // Показываем список для выбора
         // ========================================
         function showSelectionModal(results, mediaType, onSelect) {
-            Lampa.Modal.open({
+            var modal = Lampa.Modal.open({
                 title: 'Выберите правильный вариант',
                 html: $('<div class="tmdb-select-list"></div>'),
                 onBack: function() {
@@ -133,14 +133,17 @@
                 card.append(posterEl);
                 card.append(infoEl);
 
+                // ✅ ИСПРАВЛЕНО: Закрываем модалку ПЕРЕД открытием карточки
                 card.on('hover:enter', function() {
-                    onSelect(item);
-                    Lampa.Modal.close();
+                    console.log('[Rezka] 📌 Выбрано:', title, item.id);
+                    Lampa.Modal.close(); // ← СНАЧАЛА ЗАКРЫВАЕМ
+                    setTimeout(function() {
+                        onSelect(item); // ← ПОТОМ ОТКРЫВАЕМ
+                    }, 100);
                 });
 
                 list.append(card);
 
-                // Первый элемент активен
                 if (index === 0) {
                     Lampa.Controller.collectionSet(list);
                     Lampa.Controller.collectionFocus(card[0], list);
@@ -176,31 +179,58 @@
             var body = $('<div class="category-full__body" style="display:flex;flex-wrap:wrap;gap:12px;padding-bottom:2em"></div>');
 
             items.forEach(function (item) {
-                // Очистка названия
+                console.log('[Rezka] 🎨 Рендер карточки:', item.title);
+                console.log('[Rezka] 📸 Оригинальная картинка:', item.poster);
+                
+                // ✅ РАСШИРЕННАЯ ОЧИСТКА НАЗВАНИЯ (как в боте)
                 var rawTitle = item.title || '';
                 var yearMatch = rawTitle.match(/\((\d{4})\)/);
                 var year = yearMatch ? yearMatch[1] : '';
                 
-                var titleSimple = rawTitle.split('/')[0].trim();
-                var titleNoYear = titleSimple.replace(/\(\d{4}\)/g, '').trim();
-                var titleClean = titleNoYear.split(':')[0].trim();
+                // Убираем год
+                var titleNoYear = rawTitle.replace(/\s*\(\d{4}\)/, '').trim();
+                // Берем только русское название (до слеша)
+                var titleRu = titleNoYear.split('/')[0].trim();
+                // Убираем все до двоеточия для сериалов типа "911: Одинокая звезда"
+                var titleClean = titleRu.split(':')[0].trim();
+
+                console.log('[Rezka] 📝 Обработка названия:');
+                console.log('   Исходное:', rawTitle);
+                console.log('   Без года:', titleNoYear);
+                console.log('   Русское:', titleRu);
+                console.log('   Чистое:', titleClean);
 
                 // Определяем тип
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 const mediaType = isTv ? 'tv' : 'movie';
 
-                // Картинка через прокси
-                var posterUrl = item.poster 
-                    ? MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster) + '&t=' + Date.now()
-                    : '';
+                // ✅ ДЕТАЛЬНЫЙ ДЕБАГ КАРТИНОК
+                var posterUrl = '';
+                if (item.poster) {
+                    posterUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster);
+                    console.log('[Rezka] 🖼️ Картинка #1 - Исходный URL:', item.poster);
+                    console.log('[Rezka] 🖼️ Картинка #2 - Проксированный URL:', posterUrl);
+                    console.log('[Rezka] 🖼️ Картинка #3 - Полный путь:', posterUrl);
+                } else {
+                    console.warn('[Rezka] ⚠️ Нет URL постера для:', item.title);
+                }
 
-                // Создаем карточку
-                var card = Lampa.Template.get('card', {
+                // ✅ КАРТОЧКА С ДОПОЛНИТЕЛЬНОЙ ИНФОРМАЦИЕЙ
+                var cardData = {
                     title: titleClean,
                     original_title: rawTitle,
                     release_year: year,
                     img: posterUrl
-                });
+                };
+
+                // Добавляем статус серии (если есть)
+                if (item.status) {
+                    cardData.number_of_seasons = item.status; // "1 сезон, 9 серия"
+                }
+
+                console.log('[Rezka] 🎴 Данные карточки:', cardData);
+
+                var card = Lampa.Template.get('card', cardData);
 
                 card.addClass('card--collection');
                 card.css({ 
@@ -209,6 +239,43 @@
                     cursor: 'pointer',
                     marginBottom: '20px'
                 });
+
+                // ✅ ДОБАВЛЯЕМ СТАТУС ПОД НАЗВАНИЕМ (как в боте)
+                if (item.status) {
+                    var statusDiv = $('<div class="card__episode"></div>').text(item.status);
+                    statusDiv.css({
+                        position: 'absolute',
+                        bottom: '30px',
+                        left: '10px',
+                        right: '10px',
+                        padding: '5px',
+                        background: 'rgba(0,0,0,0.8)',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        textAlign: 'center',
+                        color: '#fff'
+                    });
+                    card.find('.card__view').append(statusDiv);
+                }
+
+                // ✅ ПРОВЕРКА ЗАГРУЗКИ КАРТИНКИ
+                var imgElement = card.find('img.card__img');
+                if (imgElement.length) {
+                    console.log('[Rezka] 🖼️ Картинка #4 - IMG элемент найден');
+                    console.log('[Rezka] 🖼️ Картинка #5 - SRC установлен:', imgElement.attr('src'));
+                    
+                    imgElement.on('load', function() {
+                        console.log('[Rezka] ✅ Картинка загружена успешно:', titleClean);
+                    });
+                    
+                    imgElement.on('error', function() {
+                        console.error('[Rezka] ❌ Ошибка загрузки картинки:', titleClean);
+                        console.error('[Rezka] ❌ URL:', posterUrl);
+                        console.error('[Rezka] ❌ Оригинал:', item.poster);
+                    });
+                } else {
+                    console.warn('[Rezka] ⚠️ IMG элемент не найден в карточке');
+                }
 
                 // ========================================
                 // КЛИК НА КАРТОЧКУ
@@ -222,7 +289,6 @@
                         Lampa.Loading.stop();
 
                         if (!results.length) {
-                            // Ничего не найдено
                             Lampa.Noty.show('Ничего не найдено в TMDB');
                             return;
                         }
@@ -237,16 +303,13 @@
                         }
 
                         if (exactMatch) {
-                            // Нашли точное совпадение → сразу открываем
                             console.log('[Rezka] ✅ Точное совпадение:', exactMatch.id);
                             openLampaCard(exactMatch.id, mediaType);
                         } else if (results.length === 1) {
-                            // Один результат → открываем
                             console.log('[Rezka] ✅ Один результат:', results[0].id);
                             openLampaCard(results[0].id, mediaType);
                         } else {
-                            // Несколько результатов → показываем выбор
-                            console.log('[Rezka] 📋 Показываем список');
+                            console.log('[Rezka] 📋 Показываем список из', results.length, 'вариантов');
                             showSelectionModal(results, mediaType, function(selected) {
                                 openLampaCard(selected.id, mediaType);
                             });
@@ -274,7 +337,6 @@
         if (e.type === 'ready') {
             console.log('[Rezka] ✅ Плагин загружен');
             
-            // Добавляем пункт меню
             if ($('[data-action="my_rezka_open"]').length === 0) {
                 $('.menu .menu__list').eq(0).append(
                     '<li class="menu__item selector" data-action="my_rezka_open">' +
@@ -283,7 +345,6 @@
                 );
             }
             
-            // Обработчик клика
             $('body').off('click.myrezka').on('click.myrezka', '[data-action="my_rezka_open"]', function () {
                 Lampa.Activity.push({ 
                     component: 'my_rezka', 
@@ -291,7 +352,6 @@
                 });
             });
             
-            // Регистрируем компонент
             Lampa.Component.add('my_rezka', MyRezkaComponent);
             
             console.log('[Rezka] 📌 Меню добавлено');

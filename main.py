@@ -92,7 +92,11 @@ class DeleteRequest(BaseModel):
 
 @app.get("/api/watching")
 def get_watching():
-    return client.get_category_items_paginated(CAT_WATCHING, MAX_PAGES)
+    items = client.get_category_items_paginated(CAT_WATCHING, MAX_PAGES)
+    print(f"[API] 📋 Возвращаем {len(items)} элементов")
+    if items:
+        print(f"[API] 📝 Пример первого элемента: {items[0]}")
+    return items
 
 @app.get("/api/later")
 def get_later():
@@ -117,13 +121,23 @@ def get_franchise(url: str):
 # --- ПРОКСИ ДЛЯ КАРТИНОК (ОБЯЗАТЕЛЬНО) ---
 @app.get("/api/img")
 def proxy_img(url: str):
-    if not url: return Response(status_code=404)
+    if not url: 
+        print("[IMG] ❌ Нет URL")
+        return Response(status_code=404)
+    
+    print(f"[IMG] 📥 Запрос картинки: {url}")
+    
     try:
-        r = client.session.get(url)
+        r = client.session.get(url, timeout=10)
+        print(f"[IMG] ✅ Статус: {r.status_code}")
+        print(f"[IMG] 📦 Размер: {len(r.content)} байт")
+        
         content_type = r.headers.get("content-type", "image/jpeg")
+        print(f"[IMG] 🎨 Тип: {content_type}")
+        
         return Response(content=r.content, media_type=content_type)
     except Exception as e:
-        print(f"Ошибка картинки: {e}")
+        print(f"[IMG] ❌ Ошибка: {e}")
         return Response(status_code=404)
 # -----------------------------------------
 
