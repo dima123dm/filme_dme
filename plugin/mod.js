@@ -12,6 +12,7 @@
         var scroll = null;
         var isModalOpen = false;
         var last_item = null;
+        var items_list = [];
 
         var endpoints = {
             'watching': '/api/watching',
@@ -20,8 +21,6 @@
         };
 
         comp.create = function() {
-            console.log('[Rezka] Creating:', category);
-
             var loader = $('<div class="broadcast__text">Загрузка...</div>');
             comp.html.append(loader);
 
@@ -32,32 +31,29 @@
                 timeout: 15000,
                 success: function(items) {
                     loader.remove();
-
                     if (items && items.length > 0) {
-                        console.log('[Rezka] Loaded:', items.length);
+                        items_list = items;
                         comp.build(items);
                     } else {
                         comp.html.append('<div class="broadcast__text">Список пуст</div>');
                     }
                 },
                 error: function(err) {
-                    console.error('[Rezka] Error:', err);
                     loader.remove();
                     comp.html.append('<div class="broadcast__text">Ошибка загрузки</div>');
                 }
             });
-
             return comp.html;
         };
 
         comp.build = function(items) {
-            console.log('[Rezka] Building', items.length, 'cards');
-
             if (scroll) scroll.destroy();
 
-            // Создаем скролл
+            // Создаем стандартный скролл Lampa
             scroll = new Lampa.Scroll({
-                horizontal: false
+                mask: true,
+                over: true,
+                step: 250
             });
 
             var grid = $('<div class="rezka-grid"></div>');
@@ -65,7 +61,8 @@
                 'display': 'grid',
                 'grid-template-columns': 'repeat(auto-fill, minmax(150px, 1fr))',
                 'gap': '20px',
-                'padding': '20px'
+                'padding': '20px',
+                'padding-bottom': '50px' // Отступ снизу для удобства
             });
 
             items.forEach(function(item) {
@@ -116,15 +113,9 @@
             if (item.status) {
                 var badge = $('<div></div>').text(item.status);
                 badge.css({
-                    'position': 'absolute',
-                    'bottom': '0',
-                    'left': '0',
-                    'right': '0',
-                    'padding': '5px',
-                    'background': 'rgba(0,0,0,0.9)',
-                    'color': '#fff',
-                    'font-size': '11px',
-                    'text-align': 'center'
+                    'position': 'absolute', 'bottom': '0', 'left': '0', 'right': '0',
+                    'padding': '5px', 'background': 'rgba(0,0,0,0.9)', 'color': '#fff',
+                    'font-size': '11px', 'text-align': 'center'
                 });
                 poster.append(badge);
             }
@@ -133,375 +124,203 @@
 
             var title = $('<div></div>').text(titleRu);
             title.css({
-                'padding': '10px',
-                'font-size': '13px',
-                'color': '#fff',
-                'text-align': 'center',
-                'min-height': '50px',
-                'display': 'flex',
-                'align-items': 'center',
-                'justify-content': 'center'
+                'padding': '10px', 'font-size': '13px', 'color': '#fff', 'text-align': 'center',
+                'min-height': '50px', 'display': 'flex', 'align-items': 'center', 'justify-content': 'center'
             });
             card.append(title);
 
-            card.data('item', item);
-            card.data('title_ru', titleRuClean);
-            card.data('title_en', titleEn);
-            card.data('year', year);
-            card.data('media_type', mediaType);
-
-            // --- ИСПРАВЛЕННАЯ ЛОГИКА СКРОЛЛА ---
+            // Обработчики событий
             card.on('hover:focus', function() {
                 last_item = item;
                 
-                // Используем $(this) для надежности
-                var _this = $(this);
+                // Визуальный эффект фокуса
+                $('.rezka-card').css({'transform': 'scale(1)', 'box-shadow': 'none', 'z-index': '1'});
+                $(this).css({'transform': 'scale(1.05)', 'box-shadow': '0 8px 20px rgba(255,255,255,0.3)', 'z-index': '10'});
                 
-                // Обновляем позицию скролла ТОЛЬКО через update
-                // Это заставляет Lampa прокрутить страницу к активному элементу
-                if (scroll) {
-                    scroll.update(_this);
-                }
-
-                $('.rezka-card').css({
-                    'transform': 'scale(1)',
-                    'box-shadow': 'none',
-                    'z-index': '1'
-                });
-                _this.css({
-                    'transform': 'scale(1.05)',
-                    'box-shadow': '0 8px 20px rgba(255,255,255,0.3)',
-                    'z-index': '10'
-                });
+                //  - Мы убрали ручной скролл.
+                // Lampa сама скроллит к элементу с классом 'selector focus'
             });
 
             card.on('hover:blur', function() {
-                $(this).css({
-                    'transform': 'scale(1)',
-                    'box-shadow': 'none',
-                    'z-index': '1'
-                });
+                $(this).css({'transform': 'scale(1)', 'box-shadow': 'none', 'z-index': '1'});
             });
 
             card.on('hover:enter', function(e) {
-                if (e) e.preventDefault();
-                if (isModalOpen) return;
+                if(isModalOpen) return;
                 comp.search(titleRuClean, titleEn, year, mediaType);
             });
-            
-            // Долгое нажатие открывает меню (как альтернатива цветным кнопкам)
+
             card.on('hover:long', function() {
-                 comp.menu(item);
+                comp.menu(item);
             });
 
             return card;
         };
 
+        // --- ФУНКЦИИ ПОИСКА И ДАННЫХ (без изменений) ---
         comp.search = function(titleRu, titleEn, year, mediaType) {
             Lampa.Loading.start(function() {});
-
             var allResults = [];
             var seenIds = {};
             var completed = 0;
             var toSearch = [];
-
             if (titleEn) toSearch.push(titleEn);
             if (titleRu) toSearch.push(titleRu);
 
-            if (toSearch.length === 0) {
-                Lampa.Loading.stop();
-                Lampa.Noty.show('Ошибка поиска');
-                return;
-            }
+            if (toSearch.length === 0) { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка поиска'); return; }
 
             function checkComplete() {
                 completed++;
                 if (completed === toSearch.length) {
                     Lampa.Loading.stop();
-
-                    if (allResults.length === 0) {
-                        Lampa.Noty.show('Не найдено');
-                        return;
-                    }
-
+                    if (allResults.length === 0) { Lampa.Noty.show('Не найдено'); return; }
                     var exactMatch = null;
                     if (year) {
                         for (var i = 0; i < allResults.length; i++) {
                             var r = allResults[i];
                             var rYear = (r.release_date || r.first_air_date || '').substring(0, 4);
-                            if (rYear === year) {
-                                exactMatch = r;
-                                break;
-                            }
+                            if (rYear === year) { exactMatch = r; break; }
                         }
                     }
-
-                    if (exactMatch) {
-                        comp.openCard(exactMatch.id, mediaType);
-                    } else if (allResults.length === 1) {
-                        comp.openCard(allResults[0].id, mediaType);
-                    } else {
-                        comp.showSelection(allResults, mediaType);
-                    }
+                    if (exactMatch) comp.openCard(exactMatch.id, mediaType);
+                    else if (allResults.length === 1) comp.openCard(allResults[0].id, mediaType);
+                    else comp.showSelection(allResults, mediaType);
                 }
             }
 
             toSearch.forEach(function(searchTitle) {
-                var url = 'https://api.themoviedb.org/3/search/' + mediaType +
-                          '?api_key=' + TMDB_API_KEY +
-                          '&language=ru-RU&query=' + encodeURIComponent(searchTitle);
-
-                if (year) {
-                    url += (mediaType === 'tv' ? '&first_air_date_year=' : '&year=') + year;
-                }
-
+                var url = 'https://api.themoviedb.org/3/search/' + mediaType + '?api_key=' + TMDB_API_KEY + '&language=ru-RU&query=' + encodeURIComponent(searchTitle);
+                if (year) url += (mediaType === 'tv' ? '&first_air_date_year=' : '&year=') + year;
                 $.ajax({
-                    url: url,
-                    timeout: 10000,
+                    url: url, timeout: 10000,
                     success: function(data) {
                         if (data.results) {
                             data.results.forEach(function(item) {
-                                if (!seenIds[item.id]) {
-                                    seenIds[item.id] = true;
-                                    allResults.push(item);
-                                }
+                                if (!seenIds[item.id]) { seenIds[item.id] = true; allResults.push(item); }
                             });
                         }
                         checkComplete();
                     },
-                    error: function() {
-                        checkComplete();
-                    }
+                    error: function() { checkComplete(); }
                 });
             });
         };
 
         comp.showSelection = function(results, mediaType) {
-            if (isModalOpen) return;
-            isModalOpen = true;
-
-            var items = [];
-            results.forEach(function(item) {
-                var title = item.title || item.name;
+            if (isModalOpen) return; isModalOpen = true;
+            var items = results.map(function(item) {
                 var yr = (item.release_date || item.first_air_date || '').substring(0, 4);
-                var poster = item.poster_path ? 'https://image.tmdb.org/t/p/w200' + item.poster_path : '';
-                var overview = (item.overview || 'Нет описания').substring(0, 150);
-
-                items.push({
-                    title: title + ' (' + yr + ')',
-                    description: overview,
-                    image: poster,
+                return {
+                    title: (item.title || item.name) + ' (' + yr + ')',
+                    description: (item.overview || '').substring(0, 150),
                     tmdb_id: item.id
-                });
+                };
             });
-
             Lampa.Select.show({
-                title: 'Выберите вариант',
-                items: items,
-                onSelect: function(selectedItem) {
-                    isModalOpen = false;
-                    comp.openCard(selectedItem.tmdb_id, mediaType);
-                },
-                onBack: function() {
-                    isModalOpen = false;
-                }
+                title: 'Выберите вариант', items: items,
+                onSelect: function(s) { isModalOpen = false; comp.openCard(s.tmdb_id, mediaType); },
+                onBack: function() { isModalOpen = false; }
             });
         };
 
         comp.openCard = function(tmdbId, mediaType) {
             Lampa.Activity.push({
-                url: '',
-                component: 'full',
-                id: tmdbId,
-                method: mediaType,
-                source: 'tmdb',
+                component: 'full', id: tmdbId, method: mediaType, source: 'tmdb',
                 card: { id: tmdbId, source: 'tmdb' }
             });
         };
 
         comp.menu = function(item) {
-            if (isModalOpen) return;
-            isModalOpen = true;
-
+            if (isModalOpen) return; isModalOpen = true;
             var isTv = /\/series\/|\/cartoons\//.test(item.url || '');
             var items = [];
-
             if (isTv) items.push({ title: ' Серии', value: 'episodes' });
-
             if (category !== 'watching') items.push({ title: '▶ В Смотрю', value: 'move_watching' });
             if (category !== 'later')    items.push({ title: '⏳ В Позже', value: 'move_later'    });
             if (category !== 'watched') items.push({ title: '✅ В Архив', value: 'move_watched'  });
-
             items.push({ title: '️ Удалить', value: 'delete' });
 
             Lampa.Select.show({
-                title: 'Управление',
-                items: items,
+                title: 'Управление', items: items,
                 onSelect: function(sel) {
                     isModalOpen = false;
-                    if (sel.value === 'episodes') {
-                        comp.episodes(item);
-                    } else {
-                        comp.action(sel.value, item);
-                    }
+                    if (sel.value === 'episodes') comp.episodes(item);
+                    else comp.action(sel.value, item);
                 },
-                onBack: function() {
-                    isModalOpen = false;
-                }
+                onBack: function() { isModalOpen = false; }
             });
         };
 
         comp.episodes = function(item) {
-            if (isModalOpen) return;
-            isModalOpen = true;
-
+            if (isModalOpen) return; isModalOpen = true;
             Lampa.Loading.start(function() {});
-
             $.ajax({
-                url: MY_API_URL + '/api/details',
-                data: { url: item.url },
+                url: MY_API_URL + '/api/details', data: { url: item.url },
                 success: function(details) {
                     Lampa.Loading.stop();
-
-                    if (!details || !details.seasons) {
-                        Lampa.Noty.show('Ошибка');
-                        isModalOpen = false;
-                        return;
-                    }
-
-                    var seasons = Object.keys(details.seasons).sort(function(a, b) {
-                        return parseInt(a) - parseInt(b);
-                    });
-
+                    if (!details || !details.seasons) { Lampa.Noty.show('Ошибка'); isModalOpen = false; return; }
+                    var seasons = Object.keys(details.seasons).sort(function(a, b) { return parseInt(a) - parseInt(b); });
                     var items = seasons.map(function(s) {
                         var eps = details.seasons[s];
                         var w = eps.filter(function(e) { return e.watched; }).length;
-                        return {
-                            title: 'Сезон ' + s + ' (' + w + '/' + eps.length + ')',
-                            value: s,
-                            episodes: eps
-                        };
+                        return { title: 'Сезон ' + s + ' (' + w + '/' + eps.length + ')', value: s, episodes: eps };
                     });
-
                     Lampa.Select.show({
-                        title: 'Сезон',
-                        items: items,
-                        onSelect: function(sel) {
-                            comp.episodeList(item, sel.value, sel.episodes);
-                        },
-                        onBack: function() {
-                            isModalOpen = false;
-                        }
+                        title: 'Сезон', items: items,
+                        onSelect: function(sel) { comp.episodeList(item, sel.value, sel.episodes); },
+                        onBack: function() { isModalOpen = false; }
                     });
                 },
-                error: function() {
-                    Lampa.Loading.stop();
-                    Lampa.Noty.show('Ошибка');
-                    isModalOpen = false;
-                }
+                error: function() { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка'); isModalOpen = false; }
             });
         };
 
         comp.episodeList = function(item, season, episodes) {
             var items = [{ title: '✅ Все', value: 'all', season: season }];
-
-            episodes.sort(function(a, b) {
-                return parseInt(a.episode) - parseInt(b.episode);
-            }).forEach(function(ep) {
-                items.push({
-                    title: (ep.watched ? '✅' : '▫️') + ' ' + ep.episode,
-                    value: ep.episode,
-                    season: season
-                });
+            episodes.sort(function(a, b) { return parseInt(a.episode) - parseInt(b.episode); }).forEach(function(ep) {
+                items.push({ title: (ep.watched ? '✅' : '▫️') + ' ' + ep.episode, value: ep.episode, season: season });
             });
-
             Lampa.Select.show({
-                title: 'Серия',
-                items: items,
+                title: 'Серия', items: items,
                 onSelect: function(sel) {
-                    if (sel.value === 'all') {
-                        comp.markAll(item, sel.season);
-                    } else {
-                        comp.markOne(item, sel.season, sel.value);
-                    }
+                    if (sel.value === 'all') comp.markAll(item, sel.season);
+                    else comp.markOne(item, sel.season, sel.value);
                 },
-                onBack: function() {
-                    isModalOpen = false;
-                }
+                onBack: function() { isModalOpen = false; }
             });
         };
 
         comp.markOne = function(item, season, episode) {
             Lampa.Loading.start(function() {});
             $.ajax({
-                url: MY_API_URL + '/api/episode/mark',
-                method: 'POST',
-                contentType: 'application/json',
+                url: MY_API_URL + '/api/episode/mark', method: 'POST', contentType: 'application/json',
                 data: JSON.stringify({ url: item.url, season: season, episode: episode }),
-                success: function(res) {
-                    Lampa.Loading.stop();
-                    Lampa.Noty.show(res.success ? '✅' : '❌');
-                    isModalOpen = false;
-                    if (res.success) comp.reload();
-                },
-                error: function() {
-                    Lampa.Loading.stop();
-                    Lampa.Noty.show('❌');
-                    isModalOpen = false;
-                }
+                success: function(res) { Lampa.Loading.stop(); Lampa.Noty.show(res.success ? '✅' : '❌'); isModalOpen = false; if (res.success) comp.reload(); },
+                error: function() { Lampa.Loading.stop(); Lampa.Noty.show('❌'); isModalOpen = false; }
             });
         };
 
         comp.markAll = function(item, season) {
             Lampa.Loading.start(function() {});
             $.ajax({
-                url: MY_API_URL + '/api/episode/mark-range',
-                method: 'POST',
-                contentType: 'application/json',
+                url: MY_API_URL + '/api/episode/mark-range', method: 'POST', contentType: 'application/json',
                 data: JSON.stringify({ url: item.url, season: season, from_episode: 1, to_episode: 999 }),
-                success: function(res) {
-                    Lampa.Loading.stop();
-                    Lampa.Noty.show(res.success ? '✅ ' + res.marked : '❌');
-                    isModalOpen = false;
-                    if (res.success) comp.reload();
-                },
-                error: function() {
-                    Lampa.Loading.stop();
-                    Lampa.Noty.show('❌');
-                    isModalOpen = false;
-                }
+                success: function(res) { Lampa.Loading.stop(); Lampa.Noty.show(res.success ? '✅' : '❌'); isModalOpen = false; if (res.success) comp.reload(); },
+                error: function() { Lampa.Loading.stop(); Lampa.Noty.show('❌'); isModalOpen = false; }
             });
         };
 
         comp.action = function(action, item) {
             var postId = item.url.match(/\/(\d+)-/);
             postId = postId ? postId[1] : null;
-            if (!postId) {
-                Lampa.Noty.show('❌ ID');
-                return;
-            }
-
+            if (!postId) { Lampa.Noty.show('❌ ID'); return; }
             Lampa.Loading.start(function() {});
-
             var endpoint = action === 'delete' ? '/api/delete' : '/api/move';
-            var data = action === 'delete'
-                ? { post_id: postId, category: category }
-                : { post_id: postId, from_category: category, to_category: action.replace('move_', '') };
-
+            var data = action === 'delete' ? { post_id: postId, category: category } : { post_id: postId, from_category: category, to_category: action.replace('move_', '') };
             $.ajax({
-                url: MY_API_URL + endpoint,
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify(data),
-                success: function(res) {
-                    Lampa.Loading.stop();
-                    Lampa.Noty.show(res.success ? '✅' : '❌');
-                    if (res.success) comp.reload();
-                },
-                error: function() {
-                    Lampa.Loading.stop();
-                    Lampa.Noty.show('❌');
-                }
+                url: MY_API_URL + endpoint, method: 'POST', contentType: 'application/json', data: JSON.stringify(data),
+                success: function(res) { Lampa.Loading.stop(); Lampa.Noty.show(res.success ? '✅' : '❌'); if (res.success) comp.reload(); },
+                error: function() { Lampa.Loading.stop(); Lampa.Noty.show('❌'); }
             });
         };
 
@@ -509,39 +328,13 @@
             Lampa.Activity.replace({ component: 'rezka_' + category, page: 1 });
         };
 
+        // --- УПРАВЛЕНИЕ: МИНИМАЛИЗМ И СТАБИЛЬНОСТЬ ---
         comp.start = function() {
-            console.log('[Rezka] Start');
-
-            // --- ИСПРАВЛЕННЫЙ КОНТРОЛЛЕР ---
-            // Убрали все вызовы scroll.plus/minus, которые вызывали ошибку.
-            // Теперь только Navigator переключает фокус, а скролл происходит
-            // автоматически через событие hover:focus на карточке.
+            // Создаем контроллер без перехватов up/down. Пусть Lampa сама считает координаты.
             Lampa.Controller.add('rezka', {
                 toggle: function() {
                     Lampa.Controller.collectionSet(comp.html);
                     Lampa.Controller.collectionFocus(last_item, comp.html);
-                },
-                up: function() {
-                    if (Navigator.canmove('up')) {
-                        Navigator.move('up');
-                    } else {
-                        Lampa.Controller.toggle('head');
-                    }
-                },
-                down: function() {
-                    if (Navigator.canmove('down')) {
-                        Navigator.move('down');
-                    }
-                },
-                left: function() {
-                    if (Navigator.canmove('left')) {
-                        Navigator.move('left');
-                    } else {
-                        Lampa.Controller.toggle('menu');
-                    }
-                },
-                right: function() {
-                    if (Navigator.canmove('right')) Navigator.move('right');
                 },
                 back: function() {
                     Lampa.Activity.backward();
@@ -551,14 +344,16 @@
             Lampa.Controller.toggle('rezka');
         };
 
-        comp.pause = function() {
-            Lampa.Controller.clear();
+        // ВАЖНО: Эта функция вызывается Lampa, когда мы возвращаемся на этот экран
+        comp.onResume = function() {
+            Lampa.Controller.toggle('rezka');
         };
 
-        comp.stop = function() {};
+        comp.pause = function() {
+            // Не очищаем контроллер полностью, просто снимаем активность
+        };
 
         comp.destroy = function() {
-            Lampa.Controller.clear();
             if (scroll) scroll.destroy();
             scroll = null;
             comp.html.remove();
@@ -572,41 +367,50 @@
     }
 
     function init() {
-        console.log('[Rezka] Init');
-
         if (!window.Lampa) return;
 
-        Lampa.Component.add('rezka_watching', function() { return new RezkaCategory('watching'); });
-        Lampa.Component.add('rezka_later',    function() { return new RezkaCategory('later');    });
-        Lampa.Component.add('rezka_watched',  function() { return new RezkaCategory('watched');  });
+        // ВАЖНО: Добавляем поддержку onResume для компонентов
+        function createComponent(name, category) {
+            Lampa.Component.add(name, function() {
+                var c = new RezkaCategory(category);
+                // Хук для Lampa Activity: если есть метод onResume, вызови его при возврате
+                c.activity_resume = function() {
+                    if (c.onResume) c.onResume();
+                };
+                return c;
+            });
+        }
+
+        createComponent('rezka_watching', 'watching');
+        createComponent('rezka_later', 'later');
+        createComponent('rezka_watched', 'watched');
 
         setTimeout(function() {
             $('[data-action^="rezka_"]').remove();
-
             var menu = $('.menu .menu__list').eq(0);
             [
-                { action: 'rezka_watching', comp: 'rezka_watching', icon: '▶', text: 'Смотрю' },
-                { action: 'rezka_later',    comp: 'rezka_later',    icon: '⏳', text: 'Позже'   },
-                { action: 'rezka_watched',  comp: 'rezka_watched',  icon: '✅', text: 'Архив'  }
+                { action: 'rezka_watching', icon: '▶', text: 'Смотрю' },
+                { action: 'rezka_later',    icon: '⏳', text: 'Позже' },
+                { action: 'rezka_watched',  icon: '✅', text: 'Архив' }
             ].forEach(function(item) {
-                var mi = $(
-                    '<li class="menu__item selector" data-action="' + item.action + '">' +
-                    '<div class="menu__ico">' + item.icon + '</div>' +
-                    '<div class="menu__text">' + item.text + '</div></li>'
-                );
-                mi.on('hover:enter', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    Lampa.Activity.push({ component: item.comp, page: 1 });
+                var mi = $('<li class="menu__item selector" data-action="' + item.action + '"><div class="menu__ico">' + item.icon + '</div><div class="menu__text">' + item.text + '</div></li>');
+                mi.on('hover:enter', function() {
+                    Lampa.Activity.push({ component: item.action, page: 1 });
                 });
                 menu.append(mi);
             });
         }, 1000);
+        
+        // Глобальный слушатель для исправления бага с кнопкой "Назад"
+        Lampa.Listener.follow('activity', function(e) {
+            if (e.type === 'active' && e.component.indexOf('rezka_') === 0) {
+                // Если активировался наш компонент, принудительно включаем контроллер
+                Lampa.Controller.toggle('rezka');
+            }
+        });
     }
 
     if (window.Lampa && Lampa.Listener) {
-        Lampa.Listener.follow('app', function(e) {
-            if (e.type === 'ready') init();
-        });
+        Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
     }
 })();
