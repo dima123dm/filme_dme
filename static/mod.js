@@ -1,7 +1,6 @@
 (function () {
     'use strict';
 
-    // ВАШ API (проверьте IP и порт)
     var MY_API_URL = 'http://filme.64.188.67.85.sslip.io:8080';
 
     function MyRezkaComponent(object) {
@@ -31,7 +30,6 @@
                     console.error('Rezka Error:', err);
                 }
             });
-
             return comp.html;
         };
 
@@ -54,42 +52,34 @@
             var body = $('<div class="category-full__body" style="display:flex;flex-wrap:wrap;gap:12px;padding-bottom:2em"></div>');
 
             items.forEach(function (item) {
-                // --- 1. ПАРСИМ НАЗВАНИЯ ---
+                // 1. Подготовка названий
                 let fullTitle = item.title || '';
                 let year = '';
-                
-                // Выдергиваем год из скобок (2023)
                 const yearMatch = fullTitle.match(/\((\d{4})\)/);
                 if (yearMatch) {
                     year = yearMatch[1];
                     fullTitle = fullTitle.replace(` (${year})`, '');
                 }
-
-                // Разбиваем "Название RU / Название EN"
                 let parts = fullTitle.split(' / ');
                 let titleRu = parts[0].trim();
-                // Если есть английское название, берем его, иначе русское
                 let titleEn = parts[1] ? parts[1].trim() : titleRu;
-
-                // Убираем лишний мусор из английского названия (на всякий случай)
                 titleEn = titleEn.split(':')[0].trim();
 
-                // --- 2. ОПРЕДЕЛЯЕМ ТИП ---
+                // 2. Тип контента
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 const mediaType = isTv ? 'tv' : 'movie';
 
-                // --- 3. КАРТИНКИ (HTTP -> HTTPS) ---
+                // 3. Картинка
                 let posterUrl = 'https://via.placeholder.com/300x450?text=' + encodeURIComponent(titleEn);
                 if (item.poster && item.poster.startsWith('http')) {
-                    // Проксируем через ваш сервер, а потом через weserv для SSL
                     let myProxyUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster);
                     posterUrl = 'https://images.weserv.nl/?url=' + encodeURIComponent(myProxyUrl);
                 }
 
-                // Создаем карточку
+                // Карточка в списке
                 var card = Lampa.Template.get('card', {
-                    title: titleRu,
-                    original_title: titleEn, // Показываем англ название как оригинал
+                    title: titleEn,
+                    original_title: titleRu,
                     release_year: year,
                     img: posterUrl
                 });
@@ -97,68 +87,71 @@
                 card.addClass('card--collection');
                 card.css({ width: '16.6%', minWidth: '140px', cursor: 'pointer' });
 
-                // --- 4. УМНЫЙ ПОИСК И ОТКРЫТИЕ ---
+                // --- ЛОГИКА ОТКРЫТИЯ ---
                 function findAndOpen() {
                     Lampa.Loading.start(function() { Lampa.Loading.stop(); });
+                    Lampa.Noty.show('Поиск: ' + titleEn);
 
-                    // Используем АНГЛИЙСКОЕ название для поиска, как вы просили
                     var query = titleEn; 
-                    var searchMethod = 'search/' + mediaType; // search/movie или search/tv
-                    var params = {
-                        query: query,
-                        page: 1,
-                        language: 'ru-RU' // Ищем английское название, но описание просим на русском
-                    };
-
-                    // Функция успеха
+                    var searchMethod = 'search/' + mediaType; 
+                    
                     var onSuccess = function(data) {
+                        // Сразу убираем лоадер, чтобы он не висел
                         Lampa.Loading.stop();
+
                         if (data.results && data.results.length > 0) {
-                            // Ищем точное совпадение по году
+                            // Ищем совпадение по году
                             var bestMatch = data.results.find(function(r) {
                                 var rYear = (r.release_date || r.first_air_date || '0000').substring(0, 4);
                                 return rYear == year;
                             });
-
-                            // Если по году не нашли, берем первый результат
                             var result = bestMatch || data.results[0];
 
-                            // ОТКРЫВАЕМ СРАЗУ КАРТОЧКУ
-                            Lampa.Activity.push({
+                            // ВАЖНО: Формируем "чистый" объект для открытия
+                            // Именно так работает ссылка ?card=...
+                            var activityObject = {
                                 component: 'full',
                                 id: result.id,
                                 method: mediaType,
-                                card: result,
-                                source: 'tmdb'
-                            });
+                                source: 'tmdb', // Обязательно указываем источник
+                                card: {
+                                    id: result.id,
+                                    title: result.title || result.name,
+                                    original_title: result.original_title || result.original_name,
+                                    release_date: result.release_date || result.first_air_date,
+                                    poster_path: result.poster_path,
+                                    overview: result.overview,
+                                    vote_average: result.vote_average,
+                                    source: 'tmdb' // И внутри карточки тоже
+                                }
+                            };
+
+                            // Небольшая задержка чтобы интерфейс не залип
+                            setTimeout(function() {
+                                Lampa.Activity.push(activityObject);
+                            }, 10);
+
                         } else {
-                            // Ничего не нашли -> открываем обычный поиск
-                            Lampa.Noty.show('Не найдено в TMDB, открываю поиск');
+                            Lampa.Noty.show('Не найдено в TMDB');
                             Lampa.Activity.push({ component: 'search', search: query });
                         }
                     };
 
-                    // Функция ошибки
                     var onError = function(err) {
                         Lampa.Loading.stop();
-                        console.log('API Error fallback', err);
+                        console.log('TMDB Error', err);
                         Lampa.Activity.push({ component: 'search', search: query });
                     };
 
-                    // --- ХАК ДЛЯ РАЗНЫХ ВЕРСИЙ ЛАМПЫ ---
-                    // Пробуем разные способы вызова API, так как Lampa.TMDB.get у вас нет
+                    // Вызов API
                     if (typeof Lampa.TMDB !== 'undefined' && typeof Lampa.TMDB.get === 'function') {
-                        // Стандартный способ
-                        Lampa.TMDB.get(searchMethod, params, onSuccess, onError);
+                        Lampa.TMDB.get(searchMethod, { query: query, page: 1, language: 'ru-RU' }, onSuccess, onError);
                     } else if (typeof Lampa.TMDB !== 'undefined' && typeof Lampa.TMDB.api === 'function') {
-                        // Старый способ
-                        Lampa.TMDB.api(searchMethod, params, onSuccess, onError);
+                        Lampa.TMDB.api(searchMethod, { query: query, page: 1, language: 'ru-RU' }, onSuccess, onError);
                     } else if (typeof Lampa.Api !== 'undefined' && typeof Lampa.Api.tmdb === 'function') {
-                        // Через Api
-                        Lampa.Api.tmdb(searchMethod, params, onSuccess, onError);
+                        Lampa.Api.tmdb(searchMethod, { query: query, page: 1, language: 'ru-RU' }, onSuccess, onError);
                     } else {
-                        // Если совсем ничего нет, открываем просто поиск
-                        console.warn('Ни один метод TMDB API не найден');
+                        Lampa.Loading.stop();
                         Lampa.Activity.push({ component: 'search', search: query });
                     }
                 }
