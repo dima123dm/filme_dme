@@ -52,7 +52,7 @@
             var body = $('<div class="category-full__body" style="display:flex;flex-wrap:wrap;gap:12px;padding-bottom:2em"></div>');
 
             items.forEach(function (item) {
-                // 1. Подготовка названий
+                // --- 1. Подготовка названий ---
                 let fullTitle = item.title || '';
                 let year = '';
                 const yearMatch = fullTitle.match(/\((\d{4})\)/);
@@ -60,23 +60,25 @@
                     year = yearMatch[1];
                     fullTitle = fullTitle.replace(` (${year})`, '');
                 }
+                
                 let parts = fullTitle.split(' / ');
                 let titleRu = parts[0].trim();
                 let titleEn = parts[1] ? parts[1].trim() : titleRu;
+                // Чистим английское название от лишнего
                 titleEn = titleEn.split(':')[0].trim();
 
-                // 2. Тип контента
+                // --- 2. Тип контента ---
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 const mediaType = isTv ? 'tv' : 'movie';
 
-                // 3. Картинка
+                // --- 3. Картинка (через прокси) ---
                 let posterUrl = 'https://via.placeholder.com/300x450?text=' + encodeURIComponent(titleEn);
                 if (item.poster && item.poster.startsWith('http')) {
                     let myProxyUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster);
                     posterUrl = 'https://images.weserv.nl/?url=' + encodeURIComponent(myProxyUrl);
                 }
 
-                // Карточка в списке
+                // Создаем визуальную карточку для списка
                 var card = Lampa.Template.get('card', {
                     title: titleEn,
                     original_title: titleRu,
@@ -87,8 +89,9 @@
                 card.addClass('card--collection');
                 card.css({ width: '16.6%', minWidth: '140px', cursor: 'pointer' });
 
-                // --- ЛОГИКА ОТКРЫТИЯ ---
+                // --- 4. ЛОГИКА ОТКРЫТИЯ (ИСПРАВЛЕННАЯ) ---
                 function findAndOpen() {
+                    // Запускаем лоадер
                     Lampa.Loading.start(function() { Lampa.Loading.stop(); });
                     Lampa.Noty.show('Поиск: ' + titleEn);
 
@@ -96,7 +99,7 @@
                     var searchMethod = 'search/' + mediaType; 
                     
                     var onSuccess = function(data) {
-                        // Сразу убираем лоадер, чтобы он не висел
+                        // СРАЗУ останавливаем лоадер
                         Lampa.Loading.stop();
 
                         if (data.results && data.results.length > 0) {
@@ -105,31 +108,25 @@
                                 var rYear = (r.release_date || r.first_air_date || '0000').substring(0, 4);
                                 return rYear == year;
                             });
+                            
+                            // Берем результат API целиком
                             var result = bestMatch || data.results[0];
 
-                            // ВАЖНО: Формируем "чистый" объект для открытия
-                            // Именно так работает ссылка ?card=...
-                            var activityObject = {
+                            // !!! ВАЖНО !!! 
+                            // Добавляем source внутрь объекта результата, иначе Лампа не поймет, откуда это
+                            result.source = 'tmdb';
+
+                            Lampa.Noty.show('Открываю: ' + (result.title || result.name));
+
+                            // Передаем ВЕСЬ объект result как card
+                            // Это гарантирует, что все поля (vote_average, genres, background и т.д.) будут на месте
+                            Lampa.Activity.push({
                                 component: 'full',
                                 id: result.id,
                                 method: mediaType,
-                                source: 'tmdb', // Обязательно указываем источник
-                                card: {
-                                    id: result.id,
-                                    title: result.title || result.name,
-                                    original_title: result.original_title || result.original_name,
-                                    release_date: result.release_date || result.first_air_date,
-                                    poster_path: result.poster_path,
-                                    overview: result.overview,
-                                    vote_average: result.vote_average,
-                                    source: 'tmdb' // И внутри карточки тоже
-                                }
-                            };
-
-                            // Небольшая задержка чтобы интерфейс не залип
-                            setTimeout(function() {
-                                Lampa.Activity.push(activityObject);
-                            }, 10);
+                                source: 'tmdb',
+                                card: result 
+                            });
 
                         } else {
                             Lampa.Noty.show('Не найдено в TMDB');
@@ -140,10 +137,11 @@
                     var onError = function(err) {
                         Lampa.Loading.stop();
                         console.log('TMDB Error', err);
+                        Lampa.Noty.show('Ошибка API, открываю поиск');
                         Lampa.Activity.push({ component: 'search', search: query });
                     };
 
-                    // Вызов API
+                    // Пытаемся вызвать API всеми возможными способами
                     if (typeof Lampa.TMDB !== 'undefined' && typeof Lampa.TMDB.get === 'function') {
                         Lampa.TMDB.get(searchMethod, { query: query, page: 1, language: 'ru-RU' }, onSuccess, onError);
                     } else if (typeof Lampa.TMDB !== 'undefined' && typeof Lampa.TMDB.api === 'function') {
@@ -151,6 +149,7 @@
                     } else if (typeof Lampa.Api !== 'undefined' && typeof Lampa.Api.tmdb === 'function') {
                         Lampa.Api.tmdb(searchMethod, { query: query, page: 1, language: 'ru-RU' }, onSuccess, onError);
                     } else {
+                        // Если ничего не сработало
                         Lampa.Loading.stop();
                         Lampa.Activity.push({ component: 'search', search: query });
                     }
