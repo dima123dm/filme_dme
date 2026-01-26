@@ -30,7 +30,7 @@
     // plugin on the same domain, you can leave this as an empty string
     // and relative requests will succeed.  Otherwise set this to the
     // domain (including protocol and port) where your FastAPI app runs.
-    var MY_API_URL = window.MY_API_URL || '';
+    var MY_API_URL = window.MY_API_URL || 'http://64.188.67.85:8080';
 
     function MyRezkaComponent(object) {
         var comp = {};
