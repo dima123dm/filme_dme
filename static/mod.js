@@ -3,7 +3,7 @@
 
     // ВАЖНО: Адрес вашего сервера (VPS).
     // Если поменять на 127.0.0.1, то работать будет ТОЛЬКО на том же компьютере, где сервер.
-    var MY_API_URL = 'https://filme.64.188.67.85.sslip.io';
+    var MY_API_URL = 'https://filme.64.188.67.85.sslip.io:8080';
 
     function MyRezkaComponent(object) {
         var comp = new Lampa.Component(object, {
