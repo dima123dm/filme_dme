@@ -117,6 +117,14 @@ class RezkaClient:
                 )
                 if action_icon and action_icon.get("data-id"):
                     global_id = action_icon.get("data-id")
+                # Определяем, доступен ли эпизод: если в строке нет иконки
+                # watch-episode-action и нет отметки exists-episode, значит
+                # серия ещё не вышла. Такие записи не добавляем в список.
+                has_action = bool(action_icon)
+                has_exists = bool(tr.find("span", class_="exists-episode"))
+                if not has_action and not has_exists:
+                    # ещё не выпущенная серия
+                    continue
                 # Пропускаем, если id не найден
                 if not global_id:
                     continue
