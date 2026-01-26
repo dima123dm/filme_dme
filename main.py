@@ -22,20 +22,39 @@ MAX_PAGES = int(os.getenv("REZKA_PAGES", "5"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Запуск
     polling_task = None
     update_task = None
     
     if bot:
-        print("🚀 Запуск Telegram бота...")
+        print("🚀 Запуск Telegram бота и фоновых задач...")
+        # Запускаем поллинг и проверку обновлений
         polling_task = asyncio.create_task(dp.start_polling(bot))
         update_task = asyncio.create_task(check_updates_task())
     
     yield
     
-    print("🛑 Остановка бота...")
-    if polling_task: polling_task.cancel()
-    if update_task: update_task.cancel()
-    if bot: await bot.session.close()
+    # Остановка (корректный выход по Ctrl+C)
+    print("🛑 Остановка сервисов...")
+    
+    if polling_task:
+        polling_task.cancel()
+        try:
+            await polling_task
+        except asyncio.CancelledError:
+            pass
+
+    if update_task:
+        update_task.cancel()
+        try:
+            await update_task
+        except asyncio.CancelledError:
+            pass
+            
+    if bot:
+        await bot.session.close()
+    
+    print("✅ Сервер остановлен.")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -96,13 +115,25 @@ def toggle_status(req: WatchRequest):
     success = client.toggle_watch(req.global_id, req.referer)
     return {"success": success}
 
+# Отключение кэширования для статики (чтобы изменения сразу были видны)
 if not os.path.exists("static"):
     os.makedirs("static")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Этот трюк заставляет браузер не кэшировать файлы (для разработки)
+@app.get("/static/{file_path:path}")
+async def serve_static_no_cache(file_path: str):
+    response = FileResponse(f"static/{file_path}")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @app.get("/")
 def serve_webapp():
-    return FileResponse("static/index.html")
+    response = FileResponse("static/index.html")
+    # Также отключаем кэш для главной страницы
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 if __name__ == "__main__":
     import uvicorn
