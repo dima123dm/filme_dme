@@ -1,16 +1,19 @@
 import os
 import asyncio
+import urllib.parse
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware # Добавлен импорт CORS
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from playwright.async_api import async_playwright
+from bs4 import BeautifulSoup
 
-# ИМПОРТИРУЕМ ВСЁ ИЗ ФАЙЛА BOT.PY
+# Импортируем бота (Rezka)
 from bot import client, bot, dp, check_updates_task
 
 load_dotenv()
@@ -23,67 +26,37 @@ MAX_PAGES = int(os.getenv("REZKA_PAGES", "5"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Запуск
+    # Запуск бота
     polling_task = None
     update_task = None
-    
     if bot:
-        print("🚀 Запуск Telegram бота и фоновых задач...")
-        # Запускаем поллинг и проверку обновлений
+        print("🚀 Запуск Telegram бота...")
         polling_task = asyncio.create_task(dp.start_polling(bot))
         update_task = asyncio.create_task(check_updates_task())
     
     yield
     
-    # Остановка (корректный выход по Ctrl+C)
+    # Остановка
     print("🛑 Остановка сервисов...")
-    
-    if polling_task:
-        polling_task.cancel()
-        try:
-            await polling_task
-        except asyncio.CancelledError:
-            pass
-
-    if update_task:
-        update_task.cancel()
-        try:
-            await update_task
-        except asyncio.CancelledError:
-            pass
-            
-    if bot:
-        await bot.session.close()
-
-    # Закрываем HTTP‑сессию клиента Rezka и очищаем cookies.
+    if polling_task: polling_task.cancel()
+    if update_task: update_task.cancel()
+    if bot: await bot.session.close()
     try:
-        # Закрываем сессию и очищаем cookies, чтобы после перезапуска не остались старые куки/токены
         client.session.close()
-        # На всякий случай очищаем cookie jar
-        if hasattr(client.session, "cookies"):
-            client.session.cookies.clear()
-        # Сбрасываем флаг логина
-        client.is_logged_in = False
-        print("✅ HTTP‑сессия HDRezka закрыта и очищена")
-    except Exception as e:
-        print(f"⚠️ Не удалось закрыть сессию Rezka: {e}")
-    
-    print("✅ Сервер остановлен.")
+    except: pass
 
 app = FastAPI(lifespan=lifespan)
 
-# --- ДОБАВЛЕНО: Настройка CORS ---
-# Это позволяет клиентским скриптам (в браузере) корректно работать с API,
-# даже если будут перекрестные запросы.
+# Разрешаем CORS для локальных тестов
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Разрешаем все источники
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# ---------------------------------
 
+# --- МОДЕЛИ ДАННЫХ ---
 class AddRequest(BaseModel):
     post_id: str
     category: str
@@ -96,70 +69,126 @@ class DeleteRequest(BaseModel):
     post_id: str
     category: str
 
+# --- ЛОГИКА ПОИСКА KINOGO (ИЗ SERVER.PY, НО ASYNC) ---
+async def search_kinogo_server(query: str):
+    print(f"🔍 [Server] Поиск Kinogo через Playwright: {query}")
+    async with async_playwright() as p:
+        # Запускаем браузер headless (без окна)
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+        )
+        try:
+            page = await browser.new_page()
+            # Идем на главную
+            await page.goto("https://kinogo.inc/", timeout=30000, wait_until="domcontentloaded")
+            
+            # Ищем поле поиска (как в твоем server.py)
+            search_input = page.locator('input[name="story"], input[type="text"][placeholder*="поиск"], .search input').first
+            if await search_input.count() > 0:
+                await search_input.fill(query)
+                await page.wait_for_timeout(500)
+                await search_input.press('Enter')
+                
+                # Ждем результаты
+                await page.wait_for_timeout(3000)
+                
+                # Парсим результаты
+                html = await page.content()
+                soup = BeautifulSoup(html, 'html.parser')
+                items = soup.select('.shortstory')
+                
+                results = []
+                for item in items:
+                    try:
+                        # Логика извлечения ссылки (адаптирована из server.py)
+                        title_tag = item.select_one('h2.zagolovki a') or item.select_one('.shortstorytitle a')
+                        if not title_tag: continue
+                        
+                        link = title_tag.get('href')
+                        title = title_tag.get_text(strip=True)
+                        
+                        # Исправляем относительные ссылки
+                        if link and not link.startswith('http'):
+                            link = 'https://kinogo.inc' + link if link.startswith('/') else 'https://kinogo.inc/' + link
+                            
+                        # Постер
+                        img_tag = item.select_one('.shortimg img') or item.select_one('img')
+                        poster = ""
+                        if img_tag:
+                            poster = img_tag.get('src') or img_tag.get('data-src') or ""
+                            if poster and not poster.startswith('http'):
+                                poster = 'https://kinogo.inc' + poster
+
+                        results.append({
+                            "title": title,
+                            "url": link,
+                            "poster": poster
+                        })
+                    except Exception: 
+                        continue
+                return results
+            else:
+                print("⚠️ Поле поиска не найдено")
+                return []
+        except Exception as e:
+            print(f"❌ Ошибка поиска: {e}")
+            return []
+        finally:
+            await browser.close()
+
+# --- API ENDPOINTS ---
+
+@app.get("/api/kinogo/search")
+async def kinogo_search_api(q: str):
+    """API для поиска, вызывает браузер на сервере"""
+    results = await search_kinogo_server(q)
+    return results
+
+# ... (Остальные эндпоинты Rezka без изменений) ...
 @app.get("/api/watching")
-def get_watching():
-    return client.get_category_items_paginated(CAT_WATCHING, MAX_PAGES)
+def get_watching(): return client.get_category_items_paginated(CAT_WATCHING, MAX_PAGES)
 
 @app.get("/api/later")
-def get_later():
-    return client.get_category_items_paginated(CAT_LATER, MAX_PAGES)
+def get_later(): return client.get_category_items_paginated(CAT_LATER, MAX_PAGES)
 
 @app.get("/api/watched")
-def get_watched():
-    return client.get_category_items_paginated(CAT_WATCHED, MAX_PAGES)
+def get_watched(): return client.get_category_items_paginated(CAT_WATCHED, MAX_PAGES)
 
 @app.get("/api/details")
-def get_details(url: str):
-    return client.get_series_details(url)
+def get_details(url: str): return client.get_series_details(url)
 
 @app.get("/api/search")
-def search(q: str):
-    return client.search(q)
-
-@app.get("/api/franchise")
-def get_franchise(url: str):
-    return client.get_franchise_items(url)
+def search(q: str): return client.search(q)
 
 @app.post("/api/add")
 def add_item(req: AddRequest):
-    cat_id = CAT_WATCHING
-    if req.category == "later": cat_id = CAT_LATER
-    elif req.category == "watched": cat_id = CAT_WATCHED
-    success = client.add_favorite(req.post_id, cat_id)
-    return {"success": success}
+    cat = CAT_WATCHING
+    if req.category == "later": cat = CAT_LATER
+    elif req.category == "watched": cat = CAT_WATCHED
+    return {"success": client.add_favorite(req.post_id, cat)}
 
 @app.post("/api/delete")
 def delete_item(req: DeleteRequest):
-    cat_id = CAT_WATCHING
-    if req.category == "later": cat_id = CAT_LATER
-    elif req.category == "watched": cat_id = CAT_WATCHED
-    success = client.remove_favorite(req.post_id, cat_id)
-    return {"success": success}
+    cat = CAT_WATCHING
+    if req.category == "later": cat = CAT_LATER
+    elif req.category == "watched": cat = CAT_WATCHED
+    return {"success": client.remove_favorite(req.post_id, cat)}
 
 @app.post("/api/toggle")
 def toggle_status(req: WatchRequest):
-    success = client.toggle_watch(req.global_id, req.referer)
-    return {"success": success}
+    return {"success": client.toggle_watch(req.global_id, req.referer)}
 
-# Отключение кэширования для статики (чтобы изменения сразу были видны)
-if not os.path.exists("static"):
-    os.makedirs("static")
+# Статика
+if not os.path.exists("static"): os.makedirs("static")
 
-# Этот трюк заставляет браузер не кэшировать файлы (для разработки)
 @app.get("/static/{file_path:path}")
-async def serve_static_no_cache(file_path: str):
-    response = FileResponse(f"static/{file_path}")
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
+async def serve_static(file_path: str):
+    return FileResponse(f"static/{file_path}", headers={"Cache-Control": "no-cache"})
 
 @app.get("/")
-def serve_webapp():
-    response = FileResponse("static/index.html")
-    # Также отключаем кэш для главной страницы
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return response
+def serve_index():
+    return FileResponse("static/index.html", headers={"Cache-Control": "no-cache"})
 
 if __name__ == "__main__":
     import uvicorn

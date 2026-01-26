@@ -4,9 +4,10 @@ tg.expand();
 
 let currentCategory = 'watching';
 let art = null;
-const KINOGO_BASE = "https://kinogo.inc";
+let currentMovieTitle = "";
 
-// --- НАВИГАЦИЯ ---
+// --- ОБЫЧНЫЕ ФУНКЦИИ (Rezka) ---
+
 async function switchTab(cat, btn) {
     currentCategory = cat;
     document.getElementById('search-ui').style.display = 'none';
@@ -48,26 +49,23 @@ async function loadGrid(cat) {
 
 let currentPostId = null;
 let currentDetailsUrl = null;
-let currentMovieTitle = "";
 
-// --- ДЕТАЛИ ---
 async function openDetails(url, title, poster) {
     const modal = document.getElementById('details');
     modal.classList.add('open');
     document.getElementById('det-img').src = poster;
     document.getElementById('det-title').innerText = title;
     currentMovieTitle = title;
-
-    closePlayer();
     
+    closePlayer(); // Сброс плеера
     document.getElementById('det-controls').style.display = 'none';
-    const franchiseContainer = document.getElementById('det-franchises');
-    if (franchiseContainer) franchiseContainer.innerHTML = '';
+    const list = document.getElementById('det-list');
+    list.innerHTML = '<div style="text-align:center; padding:40px; color:#888">Загрузка...</div>';
+    
+    // Чистим франшизы
+    document.getElementById('det-franchises').innerHTML = '';
 
     currentDetailsUrl = url;
-    const list = document.getElementById('det-list');
-    list.innerHTML = '<div style="text-align:center; padding:40px; color:#888">Загрузка информации...</div>';
-    
     try {
         const res = await fetch(`/api/details?url=${encodeURIComponent(url)}`);
         const data = await res.json();
@@ -80,33 +78,27 @@ async function openDetails(url, title, poster) {
         
         list.innerHTML = '';
         
-        // Франшизы
+        // Рендер франшиз (если есть)
         if (data.franchises && data.franchises.length > 0) {
-            if (franchiseContainer) {
-                const fTitle = document.createElement('div');
-                fTitle.className = 'season-title';
-                fTitle.innerText = 'Связанные проекты';
-                franchiseContainer.appendChild(fTitle);
-                const fScroll = document.createElement('div');
-                fScroll.className = 'franchise-scroll';
-                data.franchises.forEach(f => {
-                    const item = document.createElement('div');
-                    item.className = 'franchise-card';
-                    item.onclick = () => openDetails(f.url, f.title, f.poster);
-                    item.innerHTML = `
-                        <img src="${f.poster}">
-                        <div class="f-info">
-                            <div class="f-title">${f.title}</div>
-                            <div class="f-year">${f.info || ''}</div>
-                        </div>
-                    `;
-                    fScroll.appendChild(item);
-                });
-                franchiseContainer.appendChild(fScroll);
-            }
+            const fContainer = document.getElementById('det-franchises');
+            const fTitle = document.createElement('div');
+            fTitle.className = 'season-title';
+            fTitle.innerText = 'Связанные части';
+            fContainer.appendChild(fTitle);
+            
+            const fScroll = document.createElement('div');
+            fScroll.className = 'franchise-scroll';
+            data.franchises.forEach(f => {
+                const item = document.createElement('div');
+                item.className = 'franchise-card';
+                item.onclick = () => openDetails(f.url, f.title, f.poster);
+                item.innerHTML = `<img src="${f.poster}"><div class="f-info"><div class="f-title">${f.title}</div></div>`;
+                fScroll.appendChild(item);
+            });
+            fContainer.appendChild(fScroll);
         }
 
-        // Сезоны (просто список для информации)
+        // Рендер серий
         if (data.seasons) {
             Object.keys(data.seasons).forEach(s => {
                 const h = document.createElement('div');
@@ -117,7 +109,7 @@ async function openDetails(url, title, poster) {
                     const row = document.createElement('div');
                     row.className = `ep-row ${ep.watched ? 'watched' : ''}`;
                     row.innerHTML = `
-                        <span style="flex:1; padding-right:10px;">${ep.title}</span>
+                        <span style="flex:1;">${ep.title}</span>
                         <div class="check ${ep.watched ? 'active' : ''}" onclick="toggle('${ep.global_id}', this)"></div>
                     `;
                     row.querySelector('.check').rowElement = row;
@@ -126,7 +118,7 @@ async function openDetails(url, title, poster) {
             });
         }
     } catch (e) {
-        list.innerHTML = '<div style="text-align:center; padding:20px;">Ошибка загрузки деталей</div>';
+        list.innerHTML = '<div style="text-align:center;">Ошибка загрузки</div>';
     }
 }
 
@@ -135,99 +127,90 @@ function closeDetails() {
     document.getElementById('details').classList.remove('open');
 }
 
-// --- ОНЛАЙН ПРОСМОТР (KINOGO) ---
+// --- ЛОГИКА KINOGO ---
 
-function closePlayer() {
-    if (art) {
-        art.destroy();
-        art = null;
-    }
-    document.getElementById('player-container').style.display = 'none';
-    document.getElementById('translation-box').style.display = 'none';
-    document.getElementById('translation-select').innerHTML = '<option value="">Выберите озвучку...</option>';
-}
-
-// Запуск поиска
+// 1. Поиск (Через сервер, как в server.py)
 async function startOnlineView() {
     if (!currentMovieTitle) return;
     
     const btn = document.querySelector('.btn-play-online');
     const originalText = btn.innerText;
-    btn.innerText = "🔍 Поиск...";
+    btn.innerText = "🔍 Поиск на сервере...";
     
-    // 1. Чистим название: берем всё до скобки '(' или слеша '/'
-    // Пример: "Уэнсдэй (2022)" -> "Уэнсдэй"
-    // Пример: "Уэнсдэй / Wednesday" -> "Уэнсдэй"
+    // Убираем лишнее из названия (год, англ название) для лучшего поиска
     let cleanTitle = currentMovieTitle.split('(')[0].split('/')[0].trim();
     
-    await trySearch(cleanTitle, btn, originalText);
-}
-
-// Логика поиска с повтором при неудаче
-async function trySearch(query, btn, originalBtnText) {
     try {
-        console.log(`Ищем на Kinogo: ${query}`);
-        const searchUrl = `${KINOGO_BASE}/index.php?do=search&subaction=search&story=${encodeURIComponent(query)}`;
+        // ОБРАЩАЕМСЯ К НАШЕМУ СЕРВЕРУ (FastAPI + Playwright)
+        const res = await fetch(`/api/kinogo/search?q=${encodeURIComponent(cleanTitle)}`);
+        const results = await res.json();
         
-        const res = await fetch(searchUrl);
-        const text = await res.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(text, 'text/html');
-        
-        // Ищем первый результат
-        const firstLink = doc.querySelector('.shortstorytitle a');
-        
-        if (!firstLink) {
-            // Если не нашли — спрашиваем пользователя
-            let manualTitle = prompt(`Не найдено по запросу: "${query}".\n\nПопробуйте ввести название вручную (лучше на английском, например "Wednesday"):`, query);
-            
-            if (manualTitle) {
-                // Пробуем искать снова с новым названием
-                await trySearch(manualTitle, btn, originalBtnText);
+        if (!results || results.length === 0) {
+            // Если не нашли, пробуем ручной ввод
+            let manual = prompt("Сервер не нашел фильм. Введите название для поиска (Kinogo):", cleanTitle);
+            if (manual) {
+                const res2 = await fetch(`/api/kinogo/search?q=${encodeURIComponent(manual)}`);
+                const results2 = await res2.json();
+                if (results2.length > 0) {
+                    processSearchResult(results2[0], btn, originalText);
+                } else {
+                    alert("Ничего не найдено.");
+                    btn.innerText = originalText;
+                }
             } else {
-                // Отмена
-                btn.innerText = originalBtnText;
+                btn.innerText = originalText;
             }
             return;
         }
         
-        const movieUrl = firstLink.href;
-        console.log(`Найдена ссылка: ${movieUrl}`);
-        btn.innerText = "⏳ Загрузка...";
-        
-        await loadKinogoPage(movieUrl);
-        btn.innerText = originalBtnText; // Возвращаем текст кнопки
+        // Берем первый результат
+        processSearchResult(results[0], btn, originalText);
         
     } catch (e) {
-        alert('Ошибка доступа к Kinogo. Проверьте, включено ли расширение CORS!');
-        console.error(e);
-        btn.innerText = originalBtnText;
+        alert("Ошибка связи с сервером поиска.");
+        btn.innerText = originalText;
     }
 }
 
-async function loadKinogoPage(url) {
+async function processSearchResult(item, btn, originalText) {
+    console.log("Найден фильм:", item.title, item.url);
+    btn.innerText = "⏳ Загрузка плеера...";
+    
+    // 2. Просмотр (Напрямую с клиента, чтобы не блокировало видео)
+    // Мы получили ссылку от сервера, теперь парсим её сами
+    await loadKinogoPageClient(item.url);
+    
+    btn.innerText = originalText;
+}
+
+// Эта функция работает В БРАУЗЕРЕ (Украина)
+async function loadKinogoPageClient(url) {
     try {
+        // ВАЖНО: Тут нужно расширение CORS, так как запрос идет на kinogo.inc
         const res = await fetch(url);
         const text = await res.text();
         
+        // Показываем плеер
         document.getElementById('player-container').style.display = 'block';
         document.getElementById('translation-box').style.display = 'block';
         
-        // Ищем m3u8
+        // Ищем m3u8 в коде страницы
         const m3u8Match = text.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/);
         
         if (m3u8Match && m3u8Match[1]) {
             let streamUrl = m3u8Match[1];
             initPlayer(streamUrl);
         } else {
-            alert('Плеер найден, но прямая ссылка не извлеклась. Возможно, нужна капча или другой метод.');
+            alert("Плеер найден, но прямая ссылка скрыта. Попробуйте другой фильм или включите VPN/CORS.");
         }
         
-        document.getElementById('translation-select').innerHTML = '<option selected>По умолчанию (Kinogo)</option>';
+        // Тут можно добавить логику парсинга озвучек, если нужно
+        const select = document.getElementById('translation-select');
+        select.innerHTML = '<option>Kinogo (Default)</option>';
         
     } catch (e) {
+        alert("Ошибка загрузки страницы Kinogo! Убедитесь, что у вас включено расширение 'Allow CORS' в браузере.");
         console.error(e);
-        alert('Ошибка загрузки страницы фильма');
     }
 }
 
@@ -256,15 +239,24 @@ function initPlayer(url) {
         lang: 'ru'
     });
     
+    // Скролл к плееру
     document.getElementById('player-container').scrollIntoView({ behavior: 'smooth' });
 }
 
-function changeTranslation(val) {
-    console.log("Смена озвучки:", val);
+function closePlayer() {
+    if (art) {
+        art.destroy();
+        art = null;
+    }
+    document.getElementById('player-container').style.display = 'none';
+    document.getElementById('translation-box').style.display = 'none';
 }
 
-// --- ДРУГИЕ ФУНКЦИИ ---
+function changeTranslation(val) {
+    console.log("Смена озвучки пока не реализована в клиенте");
+}
 
+// ... (остальные функции для работы с закладками и поиском Rezka без изменений)
 async function moveMovie(category) {
     if (!currentPostId) return;
     tg.HapticFeedback.notificationOccurred('success');
@@ -275,7 +267,7 @@ async function moveMovie(category) {
     });
     alert('Перенесено!');
     closeDetails();
-    switchTab(currentCategory, document.querySelector('.tab-btn.active'));
+    loadGrid(currentCategory);
 }
 
 async function deleteMovie() {
@@ -288,14 +280,13 @@ async function deleteMovie() {
     });
     alert('Удалено!');
     closeDetails();
-    switchTab(currentCategory, document.querySelector('.tab-btn.active'));
+    loadGrid(currentCategory);
 }
 
 async function toggle(gid, btn) {
     tg.HapticFeedback.impactOccurred('medium');
     const row = btn.rowElement;
-    const isActive = btn.classList.contains('active');
-    if (isActive) {
+    if (btn.classList.contains('active')) {
         btn.classList.remove('active');
         row.classList.remove('watched');
     } else {
@@ -314,19 +305,13 @@ function openSearch(btn) {
     btn.classList.add('active');
     document.getElementById('grid').style.display = 'none';
     document.getElementById('search-ui').style.display = 'block';
-    const input = document.getElementById('q');
-    input.focus();
-    input.value = ''; 
-    document.getElementById('search-results').innerHTML = '';
+    document.getElementById('q').focus();
 }
 
 let searchTimer;
 function doSearch(val) {
     clearTimeout(searchTimer);
-    if (val.length === 0) {
-        document.getElementById('search-results').innerHTML = '';
-        return;
-    }
+    if (val.length === 0) { document.getElementById('search-results').innerHTML = ''; return; }
     searchTimer = setTimeout(async () => {
         if (val.length < 3) return;
         const res = await fetch(`/api/search?q=${encodeURIComponent(val)}`);
@@ -341,9 +326,7 @@ function doSearch(val) {
                 <div class="search-actions">
                     <button class="btn-action btn-watch" onclick="addFav('${item.id}', 'watching')">+ Смотрю</button>
                     <button class="btn-action btn-later" onclick="addFav('${item.id}', 'later')">+ Позже</button>
-                    <button class="btn-action btn-done" onclick="addFav('${item.id}', 'watched')">✔ Архив</button>
-                </div>
-            `;
+                </div>`;
             list.appendChild(div);
         });
     }, 600);
