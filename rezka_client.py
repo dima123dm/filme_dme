@@ -516,6 +516,11 @@ class RezkaClient:
                 "Referer": ref,
                 "Origin": self.origin,
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                # Сохраняем оригинальные заголовки Sec-Fetch*, которые могут
+                # быть необходимы для корректной работы эндпоинта
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin",
             }
             # Добавляем Host, если можно извлечь
             try:
@@ -653,11 +658,26 @@ class RezkaClient:
                         rating_container = block.find("div", class_="td rating")
                         if rating_container:
                             rating = rating_container.get_text(strip=True)
+                        # Пытаемся получить постер с отдельной страницы (некоторые страницы не содержат изображений)
+                        poster = ""
+                        try:
+                            if url:
+                                r_p = self.session.get(url, headers={"Referer": self.origin})
+                                if r_p.status_code == 200:
+                                    soup_p = BeautifulSoup(r_p.text, "html.parser")
+                                    side = soup_p.find(class_="b-sidecover")
+                                    if side:
+                                        if side.find("a"):
+                                            poster = side.find("a").get("href")
+                                        elif side.find("img"):
+                                            poster = side.find("img").get("src")
+                        except Exception:
+                            poster = ""
                         items.append({
                             "id": None,
                             "title": title,
                             "url": url,
-                            "poster": "",
+                            "poster": poster,
                             "info": info_text,
                             "rating": rating,
                         })
