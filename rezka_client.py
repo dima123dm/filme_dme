@@ -316,18 +316,26 @@ class RezkaClient:
             # Пытаемся найти ссылку на страницу франшизы/серии, если она есть
             franchise_url: Optional[str] = None
             try:
-                link_fr = soup.find("a", href=re.compile(r"/franchises/"))
-                if link_fr and link_fr.get("href"):
-                    franchise_url = urljoin(self.origin, link_fr.get("href"))
+                # В некоторых версиях сайта ссылка на все проекты находится в ссылке с классом
+                # b-post__franchise_link_title внутри блока b-sidetitle
+                fr_anchor = soup.find("a", class_="b-post__franchise_link_title")
+                if fr_anchor and fr_anchor.get("href"):
+                    franchise_url = urljoin(self.origin, fr_anchor.get("href"))
                 else:
-                    heading = soup.find(
-                        lambda tag: tag.name in ["h2", "h3", "div"]
-                        and tag.get_text().strip().lower().startswith("все проекты")
-                    )
-                    if heading:
-                        next_link = heading.find_next("a", href=True)
-                        if next_link:
-                            franchise_url = urljoin(self.origin, next_link.get("href"))
+                    # fallback: ищем любую ссылку, содержащую /franchises/
+                    link_fr = soup.find("a", href=re.compile(r"/franchises/"))
+                    if link_fr and link_fr.get("href"):
+                        franchise_url = urljoin(self.origin, link_fr.get("href"))
+                    else:
+                        # Ищем заголовок «Все проекты ...»
+                        heading = soup.find(
+                            lambda tag: tag.name in ["h2", "h3", "div"]
+                            and tag.get_text().strip().lower().startswith("все проекты")
+                        )
+                        if heading:
+                            next_link = heading.find_next("a", href=True)
+                            if next_link:
+                                franchise_url = urljoin(self.origin, next_link.get("href"))
             except Exception:
                 franchise_url = None
             if sorted_seasons:
@@ -457,7 +465,7 @@ class RezkaClient:
     # ------------------------
     # Работа с эпизодами
     # ------------------------
-    def toggle_watch(self, global_id: str) -> bool:
+    def toggle_watch(self, global_id: str, referer: Optional[str] = None) -> bool:
         """
         Переключает статус просмотра для указанного эпизода.
 
@@ -468,10 +476,13 @@ class RezkaClient:
             return False
         try:
             # Формируем заголовки максимально близко к оригинальному запросу на сайте.
+            # Если передан referer (URL страницы сериала), используем его как Referer,
+            # иначе в качестве Referer берём базовый домен. Это важно для корректного
+            # обновления статуса просмотра на HDRezka.
+            ref = referer or self.origin
             headers = {
                 "X-Requested-With": "XMLHttpRequest",
-                # Referer помогает серверу определить источник запроса; без него отметка может не сохраниться.
-                "Referer": self.origin,
+                "Referer": ref,
                 "Origin": self.origin,
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             }

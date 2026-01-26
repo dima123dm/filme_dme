@@ -31,9 +31,15 @@ class AddRequest(BaseModel):
 
 
 class WatchRequest(BaseModel):
-    """Структура запроса для переключения статуса просмотра серии."""
+    """Структура запроса для переключения статуса просмотра серии.
+
+    `referer` — URL страницы сериала, который нужен для корректного
+    переключения статуса на сайте HDRezka. Этот параметр передаётся
+    клиентом из интерфейса и используется в методе `toggle_watch`.
+    """
 
     global_id: str
+    referer: Optional[str] = None
 
 
 class DeleteRequest(BaseModel):
@@ -105,8 +111,13 @@ def delete_item(req: DeleteRequest):
 
 @app.post("/api/toggle")
 def toggle_status(req: WatchRequest):
-    """Переключает статус просмотра для определённого эпизода."""
-    success = client.toggle_watch(req.global_id)
+    """Переключает статус просмотра для определённого эпизода.
+
+    Принимает global_id эпизода и необязательный referer (URL страницы
+    сериала). Referer передаётся в клиент, чтобы запрос был максимально
+    похож на запрос из браузера пользователя.
+    """
+    success = client.toggle_watch(req.global_id, req.referer)
     return {"success": success}
 
 

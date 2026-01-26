@@ -47,6 +47,8 @@ async function loadGrid(cat) {
 
 // Переменные для деталей
 let currentPostId = null;
+// Храним URL текущей страницы сериала для передачи в toggle
+let currentDetailsUrl = null;
 
 // Открытие модального окна с деталями
 async function openDetails(url, title, poster) {
@@ -56,6 +58,8 @@ async function openDetails(url, title, poster) {
     document.getElementById('det-title').innerText = title;
     document.getElementById('det-controls').style.display = 'none';
     document.getElementById('franchise-list').innerHTML = '';
+    // Сохраняем URL страницы для использования в toggle
+    currentDetailsUrl = url;
     const list = document.getElementById('det-list');
     list.innerHTML = '<div style="text-align:center; padding:40px; color:#888">Загрузка серий...</div>';
     try {
@@ -147,7 +151,7 @@ async function toggle(gid, btn) {
     await fetch('/api/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ global_id: gid })
+        body: JSON.stringify({ global_id: gid, referer: currentDetailsUrl })
     });
 }
 
