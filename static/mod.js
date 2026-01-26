@@ -7,11 +7,9 @@
         var comp = {};
 
         comp.create = function () {
-            // Используем стандартный список для правильной работы скролла
             this.html = $('<div class="items items--vertical"></div>');
             var statusLine = $('<div class="empty__descr">Загрузка...</div>');
             this.html.append(statusLine);
-
             var _this = this;
 
             fetch(MY_API_URL + '/api/watching')
@@ -24,9 +22,7 @@
                         _this.html.append('<div class="empty__descr">Список пуст</div>');
                     }
                 })
-                .catch(function (e) {
-                    statusLine.text('Ошибка: ' + e.message);
-                });
+                .catch(function (e) { statusLine.text('Ошибка: ' + e.message); });
 
             return this.render();
         };
@@ -38,67 +34,43 @@
 
         comp.render_grid = function (items) {
             var wrapper = $('<div class="category-full"></div>');
-            wrapper.append('<div class="category-full__head">Сейчас смотрю (' + items.length + ')</div>');
-            
-            var body = $('<div class="category-full__body"></div>');
-            body.css({
-                'display': 'flex',
-                'flex-wrap': 'wrap',
-                'padding-bottom': '2em'
-            });
+            wrapper.append('<div class="category-full__head">Сейчас смотрю</div>');
+            var body = $('<div class="category-full__body" style="display:flex; flex-wrap:wrap; padding-bottom:2em"></div>');
 
             items.forEach(function (item) {
-                // --- 1. ПРАВИЛЬНАЯ ОЧИСТКА ДЛЯ ПОИСКА ---
-                // Твои логи показали, что Лампа ищет "черное зеркало". 
-                // Значит, нам нужно убрать все лишнее.
-                
+                // --- 1. ОЧИСТКА НАЗВАНИЯ ---
                 var cleanTitle = item.title;
-                
-                // 1. Убираем английскую часть (всё после " / ")
-                if (cleanTitle.indexOf(' / ') > 0) {
-                    cleanTitle = cleanTitle.split(' / ')[0];
-                }
-                // 2. Убираем год в скобках (2025)
+                if (cleanTitle.indexOf(' / ') > 0) cleanTitle = cleanTitle.split(' / ')[0];
                 cleanTitle = cleanTitle.replace(/\(\d{4}\)/g, '');
-                // 3. Убираем всё после двоеточия (для "911: Нашвилл" -> "911")
-                //    Но если это просто "Мстители: Финал", то двоеточие может быть нужно.
-                //    Попробуем сначала отрезать, так поиск надежнее.
-                cleanTitle = cleanTitle.split(':')[0];
-                
-                // 4. Убираем лишние пробелы по краям
+                cleanTitle = cleanTitle.split(':')[0]; // "911: Нашвилл" -> "911"
                 cleanTitle = cleanTitle.trim();
 
-                // --- 2. КАРТИНКИ (ОБХОД КЭША) ---
+                // --- 2. КАРТИНКИ ---
                 var imgUrl = item.poster;
                 if (imgUrl && imgUrl.startsWith('http')) {
-                    // Добавляем rnd, чтобы браузер не брал старую битую картинку
-                    imgUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(imgUrl) + '&rnd=' + Math.random();
-                } else {
-                    imgUrl = './img/empty.jpg';
+                    // Используем наш прокси
+                    imgUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(imgUrl);
                 }
 
                 // --- 3. КАРТОЧКА ---
                 var card = Lampa.Template.get('card', {
-                    title: item.title,       // Показываем полное красивое название
-                    original_title: cleanTitle, // В поиск пойдет чистое
+                    title: item.title,
+                    original_title: cleanTitle,
                     release_year: item.status || '',
                     img: imgUrl
                 });
-                
                 card.addClass('card--collection');
                 card.css('width', '16.6%');
 
-                // Если картинка все равно не грузится
-                card.find('img').on('error', function () {
-                    $(this).attr('src', './img/empty.jpg');
-                });
+                card.find('img').on('error', function () { $(this).attr('src', './img/empty.jpg'); });
 
-                // --- 4. КЛИК И ПОИСК ---
+                // --- 4. КЛИК -> ПОИСК (НАДЕЖНЫЙ МЕТОД) ---
                 card.on('hover:enter', function () {
-                    // Вызываем стандартный поиск Лампы
+                    // Метод 1: Пробуем стандартный push с page: 1
                     Lampa.Activity.push({
                         component: 'search',
-                        query: cleanTitle
+                        query: cleanTitle,
+                        page: 1
                     });
                 });
 
@@ -107,7 +79,6 @@
 
             wrapper.append(body);
             this.html.append(wrapper);
-            // Восстанавливаем работу пульта и скролла
             Lampa.Controller.toggle('content');
         };
 
@@ -116,12 +87,7 @@
 
     Lampa.Listener.follow('app', function (e) {
         if (e.type == 'ready') {
-            $('.menu .menu__list').eq(0).append(
-                '<li class="menu__item selector" data-action="my_rezka_open">' +
-                '<div class="menu__ico">R</div>' +
-                '<div class="menu__text">Rezka</div>' +
-                '</li>'
-            );
+            $('.menu .menu__list').eq(0).append('<li class="menu__item selector" data-action="my_rezka_open"><div class="menu__ico">R</div><div class="menu__text">Rezka</div></li>');
             $('body').on('click', '[data-action="my_rezka_open"]', function () {
                 Lampa.Activity.push({ component: 'my_rezka', type: 'component' });
             });
