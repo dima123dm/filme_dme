@@ -6,23 +6,122 @@
 
     function MyRezkaComponent(object) {
         var comp = {};
-        comp.html = $('<div class="items items--lines"></div>');
+        comp.html = $('<div class="rezka-container"></div>');
         var isModalOpen = false;
+        var currentCategory = 'watching'; // watching, later, watched
+        var currentItems = [];
+        var currentLongPressItem = null;
 
+        // ========================================
+        // СТРУКТУРА: Табы + Контейнер карточек
+        // ========================================
         comp.create = function () {
-            var loader = $('<div class="empty__descr">Загрузка...</div>');
-            comp.html.append(loader);
+            // Создаем табы
+            var tabsHtml = $('<div class="rezka-tabs"></div>');
+            tabsHtml.css({
+                display: 'flex',
+                gap: '10px',
+                padding: '20px 20px 10px 20px',
+                borderBottom: '2px solid #333'
+            });
 
+            var tabs = [
+                { id: 'watching', label: '▶ Смотрю', icon: '▶' },
+                { id: 'later', label: '⏳ Позже', icon: '⏳' },
+                { id: 'watched', label: '✅ Архив', icon: '✅' }
+            ];
+
+            tabs.forEach(function(tab) {
+                var btn = $('<button class="rezka-tab selector"></button>');
+                btn.attr('data-category', tab.id);
+                btn.text(tab.label);
+                btn.css({
+                    flex: '1',
+                    padding: '12px',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    backgroundColor: tab.id === currentCategory ? '#e50914' : '#2a2a2a',
+                    color: '#fff',
+                    transition: 'all 0.3s'
+                });
+
+                btn.on('hover:enter click', function(e) {
+                    if (e) e.preventDefault();
+                    var category = $(this).attr('data-category');
+                    comp.switchCategory(category);
+                });
+
+                tabsHtml.append(btn);
+            });
+
+            comp.html.append(tabsHtml);
+
+            // Контейнер для контента
+            var contentContainer = $('<div class="rezka-content"></div>');
+            comp.html.append(contentContainer);
+
+            comp.loadCategory(currentCategory);
+            return comp.html;
+        };
+
+        comp.start = function () {
+            Lampa.Controller.toggle('content');
+        };
+
+        comp.pause = function () {};
+        
+        comp.destroy = function () {
+            isModalOpen = false;
+            comp.html.remove();
+        };
+
+        comp.render = function () {
+            return comp.html;
+        };
+
+        // ========================================
+        // ПЕРЕКЛЮЧЕНИЕ КАТЕГОРИИ
+        // ========================================
+        comp.switchCategory = function(category) {
+            if (category === currentCategory) return;
+            
+            currentCategory = category;
+            
+            // Обновляем стили табов
+            comp.html.find('.rezka-tab').each(function() {
+                var isActive = $(this).attr('data-category') === category;
+                $(this).css('backgroundColor', isActive ? '#e50914' : '#2a2a2a');
+            });
+
+            comp.loadCategory(category);
+        };
+
+        // ========================================
+        // ЗАГРУЗКА КАТЕГОРИИ
+        // ========================================
+        comp.loadCategory = function(category) {
+            var contentContainer = comp.html.find('.rezka-content');
+            contentContainer.empty();
+
+            var loader = $('<div class="empty__descr">Загрузка...</div>');
+            contentContainer.append(loader);
+
+            var endpoint = '/api/' + category;
+            
             $.ajax({
-                url: MY_API_URL + '/api/watching',
+                url: MY_API_URL + endpoint,
                 method: 'GET',
                 dataType: 'json',
                 success: function(items) {
                     loader.remove();
+                    currentItems = items;
                     if (items && items.length) {
-                        comp.renderItems(items);
+                        comp.renderItems(items, category, contentContainer);
                     } else {
-                        comp.html.append('<div class="empty__descr">Список пуст</div>');
+                        contentContainer.append('<div class="empty__descr">Список пуст</div>');
                     }
                     Lampa.Controller.toggle('content');
                 },
@@ -31,19 +130,6 @@
                     console.error('[Rezka] Ошибка загрузки:', err);
                 }
             });
-            return comp.html;
-        };
-
-        comp.start = function () {
-            Lampa.Controller.toggle('content');
-        };
-        comp.pause = function () {};
-        comp.destroy = function () {
-            isModalOpen = false;
-            comp.html.remove();
-        };
-        comp.render = function () {
-            return comp.html;
         };
 
         // ========================================
@@ -55,7 +141,6 @@
             var completed = 0;
             var toSearch = [];
             
-            // Добавляем оба названия для поиска
             if (titleEn) toSearch.push(titleEn);
             if (titleRu) toSearch.push(titleRu);
             
@@ -106,7 +191,7 @@
         }
 
         // ========================================
-        // Модалка выбора
+        // Модалка выбора TMDB
         // ========================================
         function showSelectionModal(results, mediaType, onSelect) {
             if (isModalOpen) {
@@ -151,7 +236,305 @@
         }
 
         // ========================================
-        // Открытие карточки
+        // Модалка выставления серий
+        // ========================================
+        function showEpisodesModal(item, category) {
+            if (isModalOpen) return;
+            
+            isModalOpen = true;
+            console.log('[Rezka] 📺 Открываем выбор серий');
+            Lampa.Loading.start(function() {});
+
+            $.ajax({
+                url: MY_API_URL + '/api/details',
+                method: 'GET',
+                data: { url: item.url },
+                dataType: 'json',
+                success: function(details) {
+                    Lampa.Loading.stop();
+                    
+                    if (!details || !details.seasons) {
+                        Lampa.Noty.show('❌ Не удалось загрузить информацию о сериях');
+                        isModalOpen = false;
+                        return;
+                    }
+                    
+                    var seasons = details.seasons;
+                    var seasonKeys = Object.keys(seasons).sort(function(a, b) {
+                        return parseInt(a) - parseInt(b);
+                    });
+                    
+                    if (seasonKeys.length === 0) {
+                        Lampa.Noty.show('❌ Серии не найдены');
+                        isModalOpen = false;
+                        return;
+                    }
+                    
+                    // Сначала выбираем сезон
+                    var seasonItems = [];
+                    seasonKeys.forEach(function(seasonKey) {
+                        var episodes = seasons[seasonKey];
+                        var watchedCount = episodes.filter(function(ep) { return ep.watched; }).length;
+                        var totalCount = episodes.length;
+                        
+                        seasonItems.push({
+                            title: 'Сезон ' + seasonKey + ' (' + watchedCount + '/' + totalCount + ')',
+                            value: seasonKey,
+                            episodes: episodes
+                        });
+                    });
+                    
+                    Lampa.Select.show({
+                        title: 'Выберите сезон',
+                        items: seasonItems,
+                        onSelect: function(selectedSeason) {
+                            showEpisodesList(item, selectedSeason.value, selectedSeason.episodes);
+                        },
+                        onBack: function() {
+                            isModalOpen = false;
+                        }
+                    });
+                },
+                error: function() {
+                    Lampa.Loading.stop();
+                    Lampa.Noty.show('❌ Ошибка связи с сервером');
+                    isModalOpen = false;
+                }
+            });
+        }
+
+        function showEpisodesList(item, seasonKey, episodes) {
+            var episodeItems = [];
+            
+            // Добавляем опцию "Отметить все"
+            episodeItems.push({
+                title: '✅ Отметить все серии как просмотренные',
+                value: 'mark_all',
+                season: seasonKey
+            });
+            
+            // Добавляем каждую серию
+            episodes.sort(function(a, b) {
+                return parseInt(a.episode) - parseInt(b.episode);
+            });
+            
+            episodes.forEach(function(ep) {
+                var icon = ep.watched ? '✅' : '▫️';
+                episodeItems.push({
+                    title: icon + ' Серия ' + ep.episode + ': ' + (ep.title || ''),
+                    value: ep.episode,
+                    season: seasonKey,
+                    episode: ep,
+                    watched: ep.watched
+                });
+            });
+            
+            Lampa.Select.show({
+                title: 'Выберите серию (Сезон ' + seasonKey + ')',
+                items: episodeItems,
+                onSelect: function(selected) {
+                    if (selected.value === 'mark_all') {
+                        markAllEpisodes(item, selected.season);
+                    } else {
+                        markSingleEpisode(item, selected.season, selected.value, selected.watched);
+                    }
+                },
+                onBack: function() {
+                    isModalOpen = false;
+                }
+            });
+        }
+
+        function markSingleEpisode(item, season, episode, currentlyWatched) {
+            Lampa.Loading.start(function() {});
+            
+            $.ajax({
+                url: MY_API_URL + '/api/episode/mark',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    url: item.url,
+                    season: season,
+                    episode: episode
+                }),
+                success: function(res) {
+                    Lampa.Loading.stop();
+                    if (res.success) {
+                        var status = currentlyWatched ? 'Отменена' : 'Просмотрена';
+                        Lampa.Noty.show('✅ Серия ' + episode + ': ' + status);
+                        isModalOpen = false;
+                        // Перезагружаем список
+                        comp.loadCategory(currentCategory);
+                    } else {
+                        Lampa.Noty.show('❌ Ошибка обновления');
+                        isModalOpen = false;
+                    }
+                },
+                error: function() {
+                    Lampa.Loading.stop();
+                    Lampa.Noty.show('❌ Ошибка связи с сервером');
+                    isModalOpen = false;
+                }
+            });
+        }
+
+        function markAllEpisodes(item, season) {
+            Lampa.Loading.start(function() {});
+            
+            $.ajax({
+                url: MY_API_URL + '/api/episode/mark-range',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    url: item.url,
+                    season: season,
+                    from_episode: 1,
+                    to_episode: 999
+                }),
+                success: function(res) {
+                    Lampa.Loading.stop();
+                    if (res.success) {
+                        Lampa.Noty.show('✅ Отмечено серий: ' + res.marked);
+                        isModalOpen = false;
+                        // Перезагружаем список
+                        comp.loadCategory(currentCategory);
+                    } else {
+                        Lampa.Noty.show('❌ Ошибка обновления');
+                        isModalOpen = false;
+                    }
+                },
+                error: function() {
+                    Lampa.Loading.stop();
+                    Lampa.Noty.show('❌ Ошибка связи с сервером');
+                    isModalOpen = false;
+                }
+            });
+        }
+
+        // ========================================
+        // Модалка управления фильмом
+        // ========================================
+        function showManageModal(item, category) {
+            if (isModalOpen) return;
+            
+            isModalOpen = true;
+            console.log('[Rezka] 🎛️ Открываем меню управления');
+
+            var items = [];
+            
+            // Кнопки перемещения в другие категории
+            if (category !== 'watching') {
+                items.push({
+                    title: '▶ Переместить в "Смотрю"',
+                    value: 'move_watching'
+                });
+            }
+            if (category !== 'later') {
+                items.push({
+                    title: '⏳ Переместить в "Позже"',
+                    value: 'move_later'
+                });
+            }
+            if (category !== 'watched') {
+                items.push({
+                    title: '✅ Переместить в "Архив"',
+                    value: 'move_watched'
+                });
+            }
+
+            // Кнопка удаления
+            items.push({
+                title: '🗑️ Удалить из всех папок',
+                value: 'delete'
+            });
+
+            Lampa.Select.show({
+                title: 'Управление: ' + (item.title || '').split('/')[0].trim(),
+                items: items,
+                onSelect: function(selected) {
+                    isModalOpen = false;
+                    handleManageAction(selected.value, item, category);
+                },
+                onBack: function() {
+                    isModalOpen = false;
+                }
+            });
+        }
+
+        // ========================================
+        // Обработка действий управления
+        // ========================================
+        function handleManageAction(action, item, fromCategory) {
+            var postId = extractPostId(item.url);
+            if (!postId) {
+                Lampa.Noty.show('❌ Ошибка: не удалось определить ID фильма');
+                return;
+            }
+
+            if (action === 'delete') {
+                Lampa.Loading.start(function() {});
+                $.ajax({
+                    url: MY_API_URL + '/api/delete',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        post_id: postId,
+                        category: fromCategory
+                    }),
+                    success: function(res) {
+                        Lampa.Loading.stop();
+                        if (res.success) {
+                            Lampa.Noty.show('✅ Удалено');
+                            comp.loadCategory(fromCategory);
+                        } else {
+                            Lampa.Noty.show('❌ Ошибка удаления');
+                        }
+                    },
+                    error: function() {
+                        Lampa.Loading.stop();
+                        Lampa.Noty.show('❌ Ошибка связи с сервером');
+                    }
+                });
+            } else if (action.startsWith('move_')) {
+                var toCategory = action.replace('move_', '');
+                Lampa.Loading.start(function() {});
+                $.ajax({
+                    url: MY_API_URL + '/api/move',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        post_id: postId,
+                        from_category: fromCategory,
+                        to_category: toCategory
+                    }),
+                    success: function(res) {
+                        Lampa.Loading.stop();
+                        if (res.success) {
+                            Lampa.Noty.show('✅ Перемещено');
+                            comp.loadCategory(fromCategory);
+                        } else {
+                            Lampa.Noty.show('❌ Ошибка перемещения');
+                        }
+                    },
+                    error: function() {
+                        Lampa.Loading.stop();
+                        Lampa.Noty.show('❌ Ошибка связи с сервером');
+                    }
+                });
+            }
+        }
+
+        // ========================================
+        // Извлечение post_id из URL
+        // ========================================
+        function extractPostId(url) {
+            if (!url) return null;
+            var match = url.match(/\/(\d+)-/);
+            return match ? match[1] : null;
+        }
+
+        // ========================================
+        // Открытие карточки TMDB
         // ========================================
         function openLampaCard(tmdbId, mediaType) {
             console.log('[Rezka] 🎬 Открываем:', tmdbId, mediaType);
@@ -170,9 +553,9 @@
         }
 
         // ========================================
-        // Рендер карточек
+        // РЕНДЕР КАРТОЧЕК
         // ========================================
-        comp.renderItems = function (items) {
+        comp.renderItems = function (items, category, container) {
             var grid = $('<div class="rezka-grid"></div>');
             grid.css({
                 display: 'grid',
@@ -194,10 +577,7 @@
                 var titleRu = parts[0].trim();
                 var titleEn = parts[1] ? parts[1].trim() : '';
                 
-                // Для отображения - чистое русское
                 var titleRuClean = titleRu.split(':')[0].trim();
-
-                console.log('[Rezka] 📝 RU:', titleRu, '| EN:', titleEn);
 
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 const mediaType = isTv ? 'tv' : 'movie';
@@ -282,23 +662,50 @@
                 card.append(titleDiv);
 
                 // ========================================
-                // КЛИК
+                // ОБРАБОТКА КЛИКОВ
                 // ========================================
                 var longPressTimer = null;
                 var isLongPress = false;
+                var longPressStage = 0; // 0 = нет, 1 = управление, 2 = серии
 
                 card.on('hover:focus', function() {
                     isLongPress = false;
+                    longPressStage = 0;
+                    currentLongPressItem = item;
+                    
+                    // Первое долгое нажатие (1 сек) - меню управления
                     longPressTimer = setTimeout(function() {
-                        isLongPress = true;
-                        Lampa.Noty.show('Выбор из списка');
-                    }, 800);
+                        longPressStage = 1;
+                        Lampa.Noty.show('📂 Меню управления');
+                        
+                        // Второе долгое нажатие (еще 1.5 сек) - выставление серий
+                        longPressTimer = setTimeout(function() {
+                            if (isTv) {
+                                longPressStage = 2;
+                                Lampa.Noty.show('📺 Выставление серий');
+                                showEpisodesModal(item, category);
+                            } else {
+                                longPressStage = 1;
+                                showManageModal(item, category);
+                            }
+                        }, 1500);
+                    }, 1000);
                 });
 
                 card.on('hover:blur', function() {
                     if (longPressTimer) {
                         clearTimeout(longPressTimer);
                         longPressTimer = null;
+                    }
+                    
+                    // Если отпустили на первой стадии - показываем меню управления
+                    if (longPressStage === 1) {
+                        isLongPress = true;
+                        showManageModal(item, category);
+                    }
+                    
+                    if (longPressStage !== 2) {
+                        longPressStage = 0;
                     }
                 });
 
@@ -310,32 +717,24 @@
                         longPressTimer = null;
                     }
                     
+                    if (isLongPress) {
+                        isLongPress = false;
+                        return; // Уже показали меню управления
+                    }
+                    
                     if (isModalOpen) {
                         console.log('[Rezka] ⚠️ Модалка уже открыта');
                         return;
                     }
                     
-                    var forceSelect = isLongPress;
-                    isLongPress = false;
-                    
-                    console.log('[Rezka] 🎯 Клик:', titleRu, forceSelect ? '(принудительно)' : '');
+                    console.log('[Rezka] 🎯 Клик:', titleRu);
                     Lampa.Loading.start(function() {});
 
-                    // ✅ Ищем по обоим названиям
                     searchTMDBBoth(titleRuClean, titleEn, year, mediaType, function(results) {
                         Lampa.Loading.stop();
 
                         if (!results.length) {
                             Lampa.Noty.show('Ничего не найдено в TMDB');
-                            return;
-                        }
-
-                        // Принудительный выбор
-                        if (forceSelect) {
-                            console.log('[Rezka] 📋 Принудительный выбор');
-                            showSelectionModal(results, mediaType, function(selected) {
-                                openLampaCard(selected.id, mediaType);
-                            });
                             return;
                         }
 
@@ -369,7 +768,7 @@
                 grid.append(card);
             });
 
-            comp.html.append(grid);
+            container.append(grid);
         };
 
         return comp;

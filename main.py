@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from bot import client, bot, dp, check_updates_task
+from bot import client, bot, dp, check_updates_task, logger
+import time
 
 load_dotenv()
 
@@ -118,6 +119,80 @@ def search(q: str):
 def get_franchise(url: str):
     return client.get_franchise_items(url)
 
+class EpisodeUpdateRequest(BaseModel):
+    url: str
+    season: str
+    episode: str
+
+@app.post("/api/episode/mark")
+def mark_episode_watched(req: EpisodeUpdateRequest):
+    """Отмечает конкретную серию как просмотренную"""
+    try:
+        # Получаем детали сериала
+        details = client.get_series_details(req.url)
+        
+        if not details or "seasons" not in details:
+            return {"success": False, "error": "Failed to get series details"}
+        
+        # Ищем нужную серию
+        seasons = details["seasons"]
+        if req.season not in seasons:
+            return {"success": False, "error": f"Season {req.season} not found"}
+        
+        episodes = seasons[req.season]
+        target_episode = None
+        
+        for ep in episodes:
+            if ep["episode"] == req.episode:
+                target_episode = ep
+                break
+        
+        if not target_episode:
+            return {"success": False, "error": f"Episode {req.episode} not found"}
+        
+        # Отмечаем как просмотренную
+        global_id = target_episode["global_id"]
+        success = client.toggle_watch(global_id, req.url)
+        
+        return {"success": success, "watched": not target_episode["watched"]}
+    except Exception as e:
+        logger.error(f"Error marking episode: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/episode/mark-range")
+def mark_episodes_range(req: dict):
+    """Отмечает диапазон серий как просмотренные"""
+    try:
+        url = req.get("url")
+        season = req.get("season")
+        from_episode = int(req.get("from_episode", 1))
+        to_episode = int(req.get("to_episode", 999))
+        
+        details = client.get_series_details(url)
+        if not details or "seasons" not in details:
+            return {"success": False, "error": "Failed to get series details"}
+        
+        seasons = details["seasons"]
+        if season not in seasons:
+            return {"success": False, "error": f"Season {season} not found"}
+        
+        episodes = seasons[season]
+        marked_count = 0
+        
+        for ep in episodes:
+            ep_num = int(ep["episode"])
+            if from_episode <= ep_num <= to_episode:
+                if not ep["watched"]:
+                    global_id = ep["global_id"]
+                    if client.toggle_watch(global_id, url):
+                        marked_count += 1
+                        time.sleep(0.3)  # Небольшая задержка между запросами
+        
+        return {"success": True, "marked": marked_count}
+    except Exception as e:
+        logger.error(f"Error marking episode range: {e}")
+        return {"success": False, "error": str(e)}
+
 # --- ПРОКСИ ДЛЯ КАРТИНОК (ОБЯЗАТЕЛЬНО) ---
 @app.get("/api/img")
 def proxy_img(url: str):
@@ -161,6 +236,30 @@ def delete_item(req: DeleteRequest):
 def toggle_status(req: WatchRequest):
     success = client.toggle_watch(req.global_id, req.referer)
     return {"success": success}
+
+class MoveRequest(BaseModel):
+    post_id: str
+    from_category: str
+    to_category: str
+
+@app.post("/api/move")
+def move_item(req: MoveRequest):
+    # Сначала добавляем в новую категорию
+    to_cat_id = CAT_WATCHING
+    if req.to_category == "later": to_cat_id = CAT_LATER
+    elif req.to_category == "watched": to_cat_id = CAT_WATCHED
+    
+    success_add = client.add_favorite(req.post_id, to_cat_id)
+    if not success_add:
+        return {"success": False, "error": "Failed to add to new category"}
+    
+    # Потом удаляем из старой категории
+    from_cat_id = CAT_WATCHING
+    if req.from_category == "later": from_cat_id = CAT_LATER
+    elif req.from_category == "watched": from_cat_id = CAT_WATCHED
+    
+    success_remove = client.remove_favorite(req.post_id, from_cat_id)
+    return {"success": success_add and success_remove}
 
 # --- СТАТИКА ---
 if not os.path.exists("static"):
