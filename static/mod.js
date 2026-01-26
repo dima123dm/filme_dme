@@ -1,16 +1,16 @@
 (function () {
     'use strict';
 
-    // ВАШ API
     var MY_API_URL = 'http://filme.64.188.67.85.sslip.io:8080';
     var TMDB_API_KEY = '4ef0d7355d9ffb5151e987764708ce96';
 
     function MyRezkaComponent(object) {
         var comp = {};
         comp.html = $('<div class="items items--vertical"></div>');
+        var currentModal = null; // Храним ссылку на модалку
 
         comp.create = function () {
-            var loader = $('<div class="empty__descr">Загрузка списка...</div>');
+            var loader = $('<div class="empty__descr">Загрузка...</div>');
             comp.html.append(loader);
 
             $.ajax({
@@ -39,6 +39,10 @@
         };
         comp.pause = function () {};
         comp.destroy = function () {
+            if (currentModal) {
+                Lampa.Modal.close();
+                currentModal = null;
+            }
             comp.html.remove();
         };
         comp.render = function () {
@@ -46,7 +50,7 @@
         };
 
         // ========================================
-        // TMDB API: Поиск напрямую
+        // TMDB API
         // ========================================
         function searchTMDB(title, year, mediaType, callback) {
             var url = 'https://api.themoviedb.org/3/search/' + mediaType + 
@@ -57,14 +61,14 @@
                 url += (mediaType === 'tv' ? '&first_air_date_year=' : '&year=') + year;
             }
             
-            console.log('[Rezka] 🔍 Поиск в TMDB:', title, year);
+            console.log('[Rezka] 🔍 Поиск:', title, year);
             
             $.ajax({
                 url: url,
                 method: 'GET',
                 dataType: 'json',
                 success: function(data) {
-                    console.log('[Rezka] ✅ Результаты TMDB:', data.results.length);
+                    console.log('[Rezka] ✅ Найдено:', data.results.length);
                     callback(data.results || []);
                 },
                 error: function(err) {
@@ -75,26 +79,35 @@
         }
 
         // ========================================
-        // Показываем список для выбора
+        // Модалка выбора
         // ========================================
         function showSelectionModal(results, mediaType, onSelect) {
-            // ✅ ИСПРАВЛЕНО: Сохраняем ссылку на модалку
-            var modalInstance = null;
-            
-            var modalHTML = $('<div class="tmdb-select-list"></div>');
-            
-            modalInstance = Lampa.Modal.open({
+            // Закрываем предыдущую модалку если есть
+            if (currentModal) {
+                Lampa.Modal.close();
+                currentModal = null;
+            }
+
+            var scrollContainer = $('<div class="tmdb-scroll-container"></div>').css({
+                maxHeight: '70vh',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                padding: '10px'
+            });
+
+            currentModal = Lampa.Modal.open({
                 title: 'Выберите правильный вариант',
-                html: modalHTML,
+                html: scrollContainer,
                 onBack: function() {
-                    console.log('[Rezka] 🔙 Закрытие модалки (Back)');
+                    console.log('[Rezka] 🔙 Закрытие');
                     Lampa.Modal.close();
+                    currentModal = null;
                     Lampa.Controller.toggle('content');
                 }
             });
 
             if (!results.length) {
-                modalHTML.append('<div style="padding:20px;text-align:center;color:#999">Ничего не найдено</div>');
+                scrollContainer.append('<div style="padding:20px;text-align:center;color:#999">Ничего не найдено</div>');
                 return;
             }
 
@@ -109,79 +122,81 @@
                 var card = $('<div class="tmdb-select-item selector"></div>');
                 card.css({
                     display: 'flex',
-                    padding: '10px',
-                    marginBottom: '10px',
+                    padding: '12px',
+                    marginBottom: '8px',
                     background: 'rgba(255,255,255,0.1)',
                     borderRadius: '8px',
                     cursor: 'pointer',
-                    alignItems: 'center'
+                    alignItems: 'flex-start',
+                    transition: 'background 0.2s'
                 });
 
+                card.hover(
+                    function() { $(this).css('background', 'rgba(255,255,255,0.15)'); },
+                    function() { $(this).css('background', 'rgba(255,255,255,0.1)'); }
+                );
+
                 if (poster) {
-                    var posterEl = $('<img>').attr('src', poster).css({
+                    var posterEl = $('<div></div>').css({
                         width: '60px',
                         height: '90px',
-                        objectFit: 'cover',
+                        backgroundImage: 'url(' + poster + ')',
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
                         borderRadius: '4px',
-                        marginRight: '15px',
+                        marginRight: '12px',
                         flexShrink: 0
                     });
                     card.append(posterEl);
                 }
 
                 var infoEl = $('<div></div>').css({ flex: 1 });
-                infoEl.append('<div style="font-weight:bold;margin-bottom:5px;font-size:14px">' + title + ' (' + year + ')</div>');
-                infoEl.append('<div style="font-size:11px;color:#999;line-height:1.3;max-height:40px;overflow:hidden">' + 
-                    (overview.length > 100 ? overview.substring(0, 100) + '...' : overview) + 
+                infoEl.append('<div style="font-weight:bold;margin-bottom:5px;font-size:15px;color:#fff">' + title + ' (' + year + ')</div>');
+                infoEl.append('<div style="font-size:12px;color:#aaa;line-height:1.4">' + 
+                    (overview.length > 120 ? overview.substring(0, 120) + '...' : overview) + 
                 '</div>');
 
                 card.append(infoEl);
 
                 // ✅ ИСПРАВЛЕНО: Правильное закрытие модалки
-                card.on('hover:enter', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
+                var handleSelect = function(e) {
+                    if (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
                     
                     console.log('[Rezka] 📌 Выбрано:', title, item.id);
                     
-                    // Сначала закрываем модалку
-                    Lampa.Modal.close();
-                    modalHTML.remove();
+                    // Удаляем все обработчики
+                    card.off('hover:enter click');
                     
-                    // Затем открываем карточку
+                    // Закрываем модалку
+                    Lampa.Modal.close();
+                    currentModal = null;
+                    
+                    // Открываем карточку
                     setTimeout(function() {
                         onSelect(item);
-                    }, 150);
-                });
-                
-                card.on('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    console.log('[Rezka] 📌 Клик:', title, item.id);
-                    
-                    Lampa.Modal.close();
-                    modalHTML.remove();
-                    
-                    setTimeout(function() {
-                        onSelect(item);
-                    }, 150);
-                });
+                    }, 200);
+                };
 
-                modalHTML.append(card);
+                card.on('hover:enter', handleSelect);
+                card.on('click', handleSelect);
+
+                scrollContainer.append(card);
 
                 if (index === 0) {
-                    Lampa.Controller.collectionSet(modalHTML);
-                    Lampa.Controller.collectionFocus(card[0], modalHTML);
+                    Lampa.Controller.collectionSet(scrollContainer);
+                    Lampa.Controller.collectionFocus(card[0], scrollContainer);
                 }
             });
         }
 
         // ========================================
-        // Открываем карточку в Лампе
+        // Открытие карточки
         // ========================================
         function openLampaCard(tmdbId, mediaType) {
-            console.log('[Rezka] 🎬 Открываем карточку:', tmdbId, mediaType);
+            console.log('[Rezka] 🎬 Открываем:', tmdbId, mediaType);
             
             Lampa.Activity.push({
                 url: 'http://lampa.mx/?card=' + tmdbId + '&media=' + mediaType + '&source=tmdb',
@@ -197,17 +212,17 @@
         }
 
         // ========================================
-        // Рендерим список карточек
+        // Рендер карточек
         // ========================================
         comp.renderItems = function (items) {
-            var wrapper = $('<div class="category-full"></div>');
-            wrapper.append('<div class="category-full__head">Сейчас смотрю</div>');
-            var body = $('<div class="category-full__body" style="display:flex;flex-wrap:wrap;gap:12px;padding-bottom:2em"></div>');
+            var body = $('<div class="category-full__body"></div>').css({
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '15px',
+                padding: '20px'
+            });
 
             items.forEach(function (item) {
-                console.log('[Rezka] 🎨 Рендер:', item.title);
-                
-                // ✅ ПАРСИНГ НАЗВАНИЯ
                 var rawTitle = item.title || '';
                 var yearMatch = rawTitle.match(/\((\d{4})\)/);
                 var year = yearMatch ? yearMatch[1] : '';
@@ -221,71 +236,80 @@
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 const mediaType = isTv ? 'tv' : 'movie';
 
-                // ✅ ИСПРАВЛЕНО: Картинка напрямую, без Lampa Template
                 var posterUrl = '';
                 if (item.poster) {
                     posterUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster);
-                    console.log('[Rezka] 🖼️ URL:', posterUrl);
                 }
 
-                // ✅ СОЗДАЕМ КАРТОЧКУ ВРУЧНУЮ (без Template)
+                // ✅ КАРТОЧКА
                 var card = $('<div class="card selector card--collection"></div>');
                 card.css({ 
                     width: '16.6%', 
-                    minWidth: '140px', 
+                    minWidth: '150px',
                     cursor: 'pointer',
-                    marginBottom: '20px',
-                    position: 'relative'
+                    position: 'relative',
+                    transition: 'transform 0.2s'
                 });
 
-                var cardView = $('<div class="card__view"></div>');
+                card.hover(
+                    function() { $(this).css('transform', 'scale(1.05)'); },
+                    function() { $(this).css('transform', 'scale(1)'); }
+                );
+
+                var cardView = $('<div class="card__view"></div>').css({
+                    position: 'relative'
+                });
                 
-                // Постер
+                // ✅ ПОСТЕР
                 if (posterUrl) {
                     var cardImg = $('<div class="card__img"></div>').css({
                         backgroundImage: 'url(' + posterUrl + ')',
                         backgroundSize: 'cover',
                         backgroundPosition: 'center',
                         paddingBottom: '150%',
-                        borderRadius: '8px'
+                        borderRadius: '8px',
+                        position: 'relative'
                     });
-                    cardView.append(cardImg);
                     
-                    console.log('[Rezka] ✅ Постер установлен:', titleClean);
-                } else {
-                    console.log('[Rezka] ⚠️ Нет постера:', titleClean);
+                    // ✅ СТАТУС ВНИЗУ ПОСТЕРА
+                    if (item.status) {
+                        var statusDiv = $('<div></div>').text(item.status).css({
+                            position: 'absolute',
+                            bottom: '0',
+                            left: '0',
+                            right: '0',
+                            padding: '5px 8px',
+                            background: 'linear-gradient(to top, rgba(0,0,0,0.9), transparent)',
+                            fontSize: '11px',
+                            textAlign: 'center',
+                            color: '#fff',
+                            fontWeight: 'bold'
+                        });
+                        cardImg.append(statusDiv);
+                    }
+                    
+                    cardView.append(cardImg);
                 }
                 
-                // Название
-                var cardTitle = $('<div class="card__title"></div>').text(titleClean);
+                // ✅ НАЗВАНИЕ ПОД ПОСТЕРОМ
+                var cardTitle = $('<div class="card__title"></div>').text(titleClean).css({
+                    marginTop: '8px',
+                    fontSize: '13px',
+                    textAlign: 'center',
+                    lineHeight: '1.3',
+                    height: '35px',
+                    overflow: 'hidden'
+                });
                 cardView.append(cardTitle);
-                
-                // Статус серии
-                if (item.status) {
-                    var statusDiv = $('<div class="card__episode"></div>').text(item.status);
-                    statusDiv.css({
-                        position: 'absolute',
-                        bottom: '25px',
-                        left: '5px',
-                        right: '5px',
-                        padding: '3px 5px',
-                        background: 'rgba(0,0,0,0.9)',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        textAlign: 'center',
-                        color: '#fff'
-                    });
-                    cardView.append(statusDiv);
-                }
                 
                 card.append(cardView);
 
                 // ========================================
-                // КЛИК НА КАРТОЧКУ
+                // КЛИК
                 // ========================================
                 function handleClick(e) {
-                    e.preventDefault();
-                    console.log('[Rezka] 🎯 Клик на:', titleClean);
+                    if (e) e.preventDefault();
+                    console.log('[Rezka] 🎯 Клик:', titleClean);
                     Lampa.Loading.start(function() {});
 
                     searchTMDB(titleClean, year, mediaType, function(results) {
@@ -325,8 +349,7 @@
                 body.append(card);
             });
 
-            wrapper.append(body);
-            comp.html.append(wrapper);
+            comp.html.append(body);
         };
 
         return comp;
@@ -356,7 +379,7 @@
             
             Lampa.Component.add('my_rezka', MyRezkaComponent);
             
-            console.log('[Rezka] 📌 Меню добавлено');
+            console.log('[Rezka] 📌 Готово');
         }
     });
 })();
