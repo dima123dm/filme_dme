@@ -3,12 +3,11 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI
+# 👇 ДОБАВИЛ Response В ИМПОРТЫ
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-# --- ДОБАВЛЕН ИМПОРТ ---
 from fastapi.middleware.cors import CORSMiddleware
-# -----------------------
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -31,40 +30,26 @@ async def lifespan(app: FastAPI):
     
     if bot:
         print("🚀 Запуск Telegram бота и фоновых задач...")
-        # Запускаем поллинг и проверку обновлений
         polling_task = asyncio.create_task(dp.start_polling(bot))
         update_task = asyncio.create_task(check_updates_task())
     
     yield
     
-    # Остановка (корректный выход по Ctrl+C)
+    # Остановка
     print("🛑 Остановка сервисов...")
-    
     if polling_task:
         polling_task.cancel()
-        try:
-            await polling_task
-        except asyncio.CancelledError:
-            pass
-
+        try: await polling_task; except: pass
     if update_task:
         update_task.cancel()
-        try:
-            await update_task
-        except asyncio.CancelledError:
-            pass
+        try: await update_task; except: pass
             
-    if bot:
-        await bot.session.close()
+    if bot: await bot.session.close()
 
-    # Закрываем HTTP‑сессию клиента Rezka и очищаем cookies.
     try:
-        # Закрываем сессию и очищаем cookies, чтобы после перезапуска не остались старые куки/токены
         client.session.close()
-        # На всякий случай очищаем cookie jar
         if hasattr(client.session, "cookies"):
             client.session.cookies.clear()
-        # Сбрасываем флаг логина
         client.is_logged_in = False
         print("✅ HTTP‑сессия HDRezka закрыта и очищена")
     except Exception as e:
@@ -74,15 +59,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# --- ДОБАВЛЕН БЛОК CORS (РАЗРЕШЕНИЕ ДЛЯ LAMPA) ---
+# --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Разрешаем запросы с любых сайтов (Lampa, localhost и т.д.)
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Разрешаем любые методы (GET, POST и т.д.)
-    allow_headers=["*"],  # Разрешаем любые заголовки
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-# -------------------------------------------------
+# ------------
 
 class AddRequest(BaseModel):
     post_id: str
@@ -120,6 +105,24 @@ def search(q: str):
 def get_franchise(url: str):
     return client.get_franchise_items(url)
 
+# 👇 НОВАЯ ФУНКЦИЯ ДЛЯ КАРТИНОК 👇
+@app.get("/api/img")
+def proxy_img(url: str):
+    """
+    Проксирует картинки с Rezka, чтобы обойти защиту браузера.
+    """
+    if not url:
+        return Response(status_code=404)
+    try:
+        # Скачиваем картинку через сессию клиента (притворяемся браузером)
+        r = client.session.get(url)
+        # Отдаем картинку как JPEG
+        return Response(content=r.content, media_type="image/jpeg")
+    except Exception as e:
+        print(f"Ошибка загрузки картинки: {e}")
+        return Response(status_code=404)
+# --------------------------------
+
 @app.post("/api/add")
 def add_item(req: AddRequest):
     cat_id = CAT_WATCHING
@@ -141,11 +144,9 @@ def toggle_status(req: WatchRequest):
     success = client.toggle_watch(req.global_id, req.referer)
     return {"success": success}
 
-# Отключение кэширования для статики (чтобы изменения сразу были видны)
 if not os.path.exists("static"):
     os.makedirs("static")
 
-# Этот трюк заставляет браузер не кэшировать файлы (для разработки)
 @app.get("/static/{file_path:path}")
 async def serve_static_no_cache(file_path: str):
     response = FileResponse(f"static/{file_path}")
@@ -157,7 +158,6 @@ async def serve_static_no_cache(file_path: str):
 @app.get("/")
 def serve_webapp():
     response = FileResponse("static/index.html")
-    # Также отключаем кэш для главной страницы
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 

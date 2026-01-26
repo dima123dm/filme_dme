@@ -1,15 +1,14 @@
 (function () {
     'use strict';
 
+    // ВАЖНО: Ваш адрес
     var MY_API_URL = 'http://64.188.67.85:8080';
 
     function MyRezkaComponent(object) {
         var comp = {};
 
         comp.create = function () {
-            // Используем класс items-vertical для вертикального списка
             this.html = $('<div class="items items--vertical"></div>');
-            
             var statusLine = $('<div class="empty__descr">Загрузка списка...</div>');
             this.html.append(statusLine);
 
@@ -22,9 +21,9 @@
                 })
                 .then(function (json) {
                     statusLine.remove();
-                    
                     if (json && json.length) {
-                        Lampa.Noty.show('Rezka: Загружено ' + json.length + ' шт.');
+                        // Уведомление, чтобы знать, что всё ок
+                        Lampa.Noty.show('Rezka: Загружено ' + json.length);
                         _this.render_grid(json);
                     } else {
                         _this.html.append('<div class="empty__descr">Список пуст</div>');
@@ -37,24 +36,16 @@
             return this.render();
         };
 
-        // Обязательные функции
         comp.start = function() {};
         comp.pause = function() {};
         comp.destroy = function() { this.html.remove(); };
         comp.render = function() { return this.html; };
 
-        // Рендеринг сеткой (ПЛИТКА)
         comp.render_grid = function (items) {
-            // Создаем контейнер-обертку
             var wrapper = $('<div class="category-full"></div>');
+            wrapper.append('<div class="category-full__head">Сейчас смотрю</div>');
             
-            // Заголовок
-            wrapper.append('<div class="category-full__head">Сейчас смотрю (' + items.length + ')</div>');
-            
-            // Тело сетки
             var body = $('<div class="category-full__body"></div>');
-            
-            // Принудительные стили для сетки, чтобы карточки не пропадали
             body.css({
                 'display': 'flex',
                 'flex-wrap': 'wrap',
@@ -62,26 +53,40 @@
             });
 
             items.forEach(function (item) {
-                // Создаем карточку
+                // 1. ЧИСТИМ НАЗВАНИЕ ДЛЯ ПОИСКА
+                // Берем часть до слеша (если название "Ru / En")
+                var cleanTitle = item.title.split('/')[0].trim();
+                // Убираем год в скобках, если есть, например "Интерстеллар (2014)" -> "Интерстеллар"
+                cleanTitle = cleanTitle.replace(/\(\d{4}\)/, '').trim();
+
+                // 2. ИСПОЛЬЗУЕМ ПРОКСИ ДЛЯ КАРТИНОК
+                // Если ссылка есть, гоним её через наш сервер
+                var imgUrl = item.poster;
+                if (imgUrl && imgUrl.startsWith('http')) {
+                    imgUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(imgUrl);
+                }
+
                 var card = Lampa.Template.get('card', {
                     title: item.title,
-                    original_title: item.title,
-                    release_year: item.status || '', // Показываем серию/статус вместо года
-                    img: item.poster
+                    original_title: cleanTitle, // Используем чистое название для оригинального
+                    release_year: item.status || '',
+                    img: imgUrl
                 });
                 
-                // Стиль карточки для сетки
                 card.addClass('card--collection');
-                card.css('width', '16.6%'); // Примерно 6 в ряд (Lampa сама подправит на мобильных)
+                card.css('width', '16.6%');
 
+                // Если прокси не сработал — заглушка
                 card.find('img').on('error', function () {
                     $(this).attr('src', './img/empty.jpg');
                 });
 
+                // КЛИК - ПОИСК
                 card.on('hover:enter', function () {
+                    // Ищем по чистому названию
                     Lampa.Activity.push({
                         component: 'search',
-                        query: item.query || item.title
+                        query: cleanTitle
                     });
                 });
 
@@ -90,8 +95,6 @@
 
             wrapper.append(body);
             this.html.append(wrapper);
-            
-            // Обновляем фокус и скролл контроллера
             Lampa.Controller.toggle('content');
         };
 
@@ -110,7 +113,7 @@
             $('body').on('click', '[data-action="my_rezka_open"]', function () {
                 Lampa.Activity.push({
                     component: 'my_rezka',
-                    type: 'component' // Изменил тип на component
+                    type: 'component'
                 });
             });
 
