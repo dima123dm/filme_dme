@@ -76,6 +76,35 @@
         }
 
         // ========================================
+        // Проверка схожести названий
+        // ========================================
+        function isTitleSimilar(title1, title2) {
+            var t1 = title1.toLowerCase().trim();
+            var t2 = title2.toLowerCase().trim();
+            
+            // Убираем спецсимволы
+            t1 = t1.replace(/[:\-—–]/g, ' ').replace(/\s+/g, ' ').trim();
+            t2 = t2.replace(/[:\-—–]/g, ' ').replace(/\s+/g, ' ').trim();
+            
+            // Точное совпадение
+            if (t1 === t2) return true;
+            
+            // Одно название содержит другое
+            if (t1.indexOf(t2) !== -1 || t2.indexOf(t1) !== -1) return true;
+            
+            // Проверяем первые слова (для "Doctor Who" vs "Doctor Cha")
+            var words1 = t1.split(' ');
+            var words2 = t2.split(' ');
+            
+            // Если оба названия из 2+ слов, проверяем оба слова
+            if (words1.length >= 2 && words2.length >= 2) {
+                return words1[0] === words2[0] && words1[1] === words2[1];
+            }
+            
+            return false;
+        }
+
+        // ========================================
         // Модалка выбора
         // ========================================
         function showSelectionModal(results, mediaType, onSelect) {
@@ -155,23 +184,19 @@
             items.forEach(function (item) {
                 var rawTitle = item.title || '';
                 
-                // Извлекаем год
                 var yearMatch = rawTitle.match(/\((\d{4})\)/);
                 var year = yearMatch ? yearMatch[1] : '';
                 
-                // Убираем год
                 var titleNoYear = rawTitle.replace(/\s*\(\d{4}\)/, '').trim();
                 
-                // ✅ РУССКОЕ и АНГЛИЙСКОЕ название
                 var parts = titleNoYear.split('/');
-                var titleRu = parts[0].trim();           // "Доктор Кто: Раскрыто"
-                var titleEn = parts[1] ? parts[1].trim() : ''; // "Doctor Who"
+                var titleRu = parts[0].trim();
+                var titleEn = parts[1] ? parts[1].trim() : '';
                 
-                // ✅ Приоритет для поиска: английское (точнее) или русское
                 var titleForSearch = titleEn || titleRu.split(':')[0].trim();
 
-                console.log('[Rezka] 📝 Показываем:', titleRu);
-                console.log('[Rezka] 🔍 Ищем:', titleForSearch, 'год:', year);
+                console.log('[Rezka] 📝', titleRu);
+                console.log('[Rezka] 🔍', titleForSearch, year);
 
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 const mediaType = isTv ? 'tv' : 'movie';
@@ -181,7 +206,6 @@
                     posterUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster);
                 }
 
-                // ✅ КАРТОЧКА
                 var card = $('<div class="rezka-card selector"></div>');
                 card.css({
                     position: 'relative',
@@ -207,7 +231,6 @@
                     }
                 );
 
-                // ✅ ПОСТЕР
                 var posterDiv = $('<div class="rezka-poster"></div>');
                 posterDiv.css({
                     width: '100%',
@@ -219,7 +242,6 @@
                     backgroundPosition: 'center'
                 });
 
-                // ✅ СТАТУС
                 if (item.status) {
                     var statusBadge = $('<div class="rezka-status"></div>');
                     statusBadge.text(item.status);
@@ -241,7 +263,6 @@
 
                 card.append(posterDiv);
 
-                // ✅ НАЗВАНИЕ (полное русское)
                 var titleDiv = $('<div class="rezka-title"></div>');
                 titleDiv.text(titleRu);
                 titleDiv.css({
@@ -260,16 +281,47 @@
                 card.append(titleDiv);
 
                 // ========================================
-                // КЛИК
+                // КЛИК (обычный и долгий)
                 // ========================================
+                var longPressTimer = null;
+                var isLongPress = false;
+
+                // ✅ ДОЛГОЕ НАЖАТИЕ (удерживание)
+                card.on('hover:focus', function() {
+                    isLongPress = false;
+                    longPressTimer = setTimeout(function() {
+                        isLongPress = true;
+                        console.log('[Rezka] 🔒 Долгое нажатие - принудительный выбор');
+                        Lampa.Noty.show('Выбор из списка');
+                    }, 800); // 800ms удерживания
+                });
+
+                card.on('hover:blur', function() {
+                    if (longPressTimer) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                });
+
+                // ✅ ОБЫЧНЫЙ КЛИК
                 function handleClick(e) {
                     if (e) e.preventDefault();
+                    
+                    // Очищаем таймер
+                    if (longPressTimer) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                    
                     if (isModalOpen) {
                         console.log('[Rezka] ⚠️ Модалка уже открыта');
                         return;
                     }
                     
-                    console.log('[Rezka] 🎯 Клик:', titleRu);
+                    var forceSelect = isLongPress;
+                    isLongPress = false;
+                    
+                    console.log('[Rezka] 🎯 Клик:', titleRu, forceSelect ? '(принудительный выбор)' : '');
                     Lampa.Loading.start(function() {});
 
                     searchTMDB(titleForSearch, year, mediaType, function(results) {
@@ -280,26 +332,35 @@
                             return;
                         }
 
-                        // ✅ ЛОГИКА КАК РАНЬШЕ: год совпадает = открываем сразу
+                        // ✅ Если долгое нажатие - сразу показываем список
+                        if (forceSelect) {
+                            console.log('[Rezka] 📋 Принудительный выбор из списка');
+                            showSelectionModal(results, mediaType, function(selected) {
+                                openLampaCard(selected.id, mediaType);
+                            });
+                            return;
+                        }
+
+                        // ✅ Ищем точное совпадение по году И названию
                         var exactMatch = null;
                         if (year) {
                             exactMatch = results.find(function(r) {
                                 var rYear = (r.release_date || r.first_air_date || '').substring(0, 4);
-                                return rYear === year;
+                                var rTitle = r.title || r.name;
+                                
+                                // Год совпадает И название похоже
+                                return rYear === year && isTitleSimilar(titleForSearch, rTitle);
                             });
                         }
 
                         if (exactMatch) {
-                            // Год совпадает → открываем сразу
-                            console.log('[Rezka] ✅ Совпадение по году:', exactMatch.id, year);
+                            console.log('[Rezka] ✅ Точное совпадение:', exactMatch.title || exactMatch.name);
                             openLampaCard(exactMatch.id, mediaType);
                         } else if (results.length === 1) {
-                            // Один результат → открываем
                             console.log('[Rezka] ✅ Один результат:', results[0].id);
                             openLampaCard(results[0].id, mediaType);
                         } else {
-                            // Несколько результатов → даем выбрать
-                            console.log('[Rezka] 📋 Несколько вариантов, показываем список');
+                            console.log('[Rezka] 📋 Несколько вариантов');
                             showSelectionModal(results, mediaType, function(selected) {
                                 openLampaCard(selected.id, mediaType);
                             });
