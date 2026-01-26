@@ -56,9 +56,25 @@ def save_state(state):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     global TELEGRAM_CHAT_ID
+    
+    user_id = str(message.from_user.id)
+    env_id = os.getenv("TELEGRAM_CHAT_ID")
+
+    # --- ПРОВЕРКА ДОСТУПА ---
+    # 1. Если ID жестко задан в .env, проверяем совпадение
+    if env_id and user_id != str(env_id):
+        # Чужой пользователь - игнорируем
+        return
+
+    # 2. Если ID не задан нигде, запоминаем первого написавшего
     if not TELEGRAM_CHAT_ID:
-        TELEGRAM_CHAT_ID = str(message.chat.id)
-        logger.info(f"✅ Chat ID установлен: {TELEGRAM_CHAT_ID}")
+        TELEGRAM_CHAT_ID = user_id
+        logger.info(f"✅ Chat ID установлен (первый вход): {TELEGRAM_CHAT_ID}")
+    
+    # 3. Если ID уже был запомнен ранее, но пишет другой человек
+    elif TELEGRAM_CHAT_ID != user_id:
+        return 
+    # ------------------------
 
     # Добавляем метку времени к URL, чтобы сбросить кэш в Telegram WebApp
     url_no_cache = f"{WEBAPP_URL}?v={int(time.time())}"
