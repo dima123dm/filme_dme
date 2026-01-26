@@ -3,7 +3,6 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 
-# 👇 ДОБАВИЛ Response В ИМПОРТЫ
 from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -39,12 +38,20 @@ async def lifespan(app: FastAPI):
     print("🛑 Остановка сервисов...")
     if polling_task:
         polling_task.cancel()
-        try: await polling_task; except: pass
+        try:
+            await polling_task
+        except:
+            pass
+
     if update_task:
         update_task.cancel()
-        try: await update_task; except: pass
+        try:
+            await update_task
+        except:
+            pass
             
-    if bot: await bot.session.close()
+    if bot:
+        await bot.session.close()
 
     try:
         client.session.close()
