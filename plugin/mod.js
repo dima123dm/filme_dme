@@ -77,8 +77,8 @@
                 boxSizing: 'border-box'
             });
             
-            items.forEach(function(item) {
-                var card = comp.createCard(item);
+            items.forEach(function(item, index) {
+                var card = comp.createCard(item, index);
                 cards.push(card);
                 grid.append(card);
             });
@@ -89,7 +89,7 @@
             comp.start();
         };
         
-        comp.createCard = function(item) {
+        comp.createCard = function(item, index) {
             var rawTitle = item.title || '';
             
             var yearMatch = rawTitle.match(/\((\d{4})\)/);
@@ -108,6 +108,7 @@
             
             // Карточка
             var card = $('<div class="rezka-card selector"></div>');
+            card.attr('data-index', index);
             card.css({
                 position: 'relative',
                 cursor: 'pointer',
@@ -169,10 +170,10 @@
             
             card.append(titleDiv);
             
-            // Долгое нажатие - правильная реализация
-            var longPressTimer = null;
-            var longPressActivated = false;
-            var currentCard = card;
+            // Долгое нажатие - ПРАВИЛЬНАЯ реализация
+            var pressStartTime = 0;
+            var longPressThreshold = 1000; // 1 секунда
+            var isPressing = false;
             
             // Hover эффекты
             card.on('hover:focus', function() {
@@ -190,21 +191,9 @@
                     'z-index': '10'
                 });
                 
-                // Сброс флага
-                longPressActivated = false;
-                
-                // Запускаем таймер долгого нажатия
-                if (longPressTimer) {
-                    clearTimeout(longPressTimer);
-                }
-                
-                longPressTimer = setTimeout(function() {
-                    if (!longPressActivated && !isModalOpen) {
-                        longPressActivated = true;
-                        console.log('[Rezka] Long press activated');
-                        comp.showManageModal(item);
-                    }
-                }, 800); // 800ms для активации меню
+                // Запоминаем время начала фокуса
+                pressStartTime = Date.now();
+                isPressing = true;
             });
             
             card.on('hover:blur', function() {
@@ -215,33 +204,34 @@
                     'z-index': '1'
                 });
                 
-                // Очищаем таймер
-                if (longPressTimer) {
-                    clearTimeout(longPressTimer);
-                    longPressTimer = null;
-                }
+                isPressing = false;
+                pressStartTime = 0;
             });
             
-            // Обычный клик
+            // Клик/Enter
             card.on('hover:enter', function(e) {
                 if (e) e.preventDefault();
                 
-                // Очищаем таймер
-                if (longPressTimer) {
-                    clearTimeout(longPressTimer);
-                    longPressTimer = null;
+                if (!isPressing) return;
+                
+                var pressDuration = Date.now() - pressStartTime;
+                console.log('[Rezka] Press duration:', pressDuration, 'ms');
+                
+                // Если долгое нажатие - показываем меню управления
+                if (pressDuration >= longPressThreshold) {
+                    console.log('[Rezka] Long press - show manage menu');
+                    if (!isModalOpen) {
+                        comp.showManageModal(item);
+                    }
+                } else {
+                    // Короткое нажатие - открываем фильм
+                    console.log('[Rezka] Short press - open movie');
+                    if (!isModalOpen) {
+                        comp.openCard(titleRuClean, titleEn, year, mediaType);
+                    }
                 }
                 
-                // Если было долгое нажатие - игнорируем клик
-                if (longPressActivated) {
-                    longPressActivated = false;
-                    return;
-                }
-                
-                if (isModalOpen) return;
-                
-                console.log('[Rezka] Opening:', titleRu);
-                comp.openCard(titleRuClean, titleEn, year, mediaType);
+                isPressing = false;
             });
             
             return card;
@@ -540,7 +530,6 @@
                 up: function() {
                     if (Navigator.canmove('up')) {
                         Navigator.move('up');
-                        // Скроллим вверх
                         if (scroll) scroll.minus();
                     } else {
                         Lampa.Controller.toggle('head');
@@ -549,7 +538,6 @@
                 down: function() {
                     if (Navigator.canmove('down')) {
                         Navigator.move('down');
-                        // Скроллим вниз
                         if (scroll) scroll.plus();
                     }
                 },
@@ -609,35 +597,37 @@
         setTimeout(function() {
             var menu = $('.menu .menu__list').eq(0);
             
-            if ($('[data-action="rezka_watching"]').length === 0) {
-                var items = [
-                    { action: 'rezka_watching', component: 'rezka_watching', icon: '▶', text: 'Смотрю' },
-                    { action: 'rezka_later', component: 'rezka_later', icon: '⏳', text: 'Позже' },
-                    { action: 'rezka_watched', component: 'rezka_watched', icon: '✅', text: 'Архив' }
-                ];
+            // Удаляем старые пункты если есть
+            $('[data-action^="rezka_"]').remove();
+            
+            var items = [
+                { action: 'rezka_watching', component: 'rezka_watching', icon: '▶', text: 'Смотрю' },
+                { action: 'rezka_later', component: 'rezka_later', icon: '⏳', text: 'Позже' },
+                { action: 'rezka_watched', component: 'rezka_watched', icon: '✅', text: 'Архив' }
+            ];
+            
+            items.forEach(function(item) {
+                var menuItem = $(
+                    '<li class="menu__item selector" data-action="' + item.action + '">' +
+                    '<div class="menu__ico">' + item.icon + '</div>' +
+                    '<div class="menu__text">' + item.text + '</div>' +
+                    '</li>'
+                );
                 
-                items.forEach(function(item) {
-                    var menuItem = $(
-                        '<li class="menu__item selector" data-action="' + item.action + '">' +
-                        '<div class="menu__ico">' + item.icon + '</div>' +
-                        '<div class="menu__text">' + item.text + '</div>' +
-                        '</li>'
-                    );
-                    
-                    menuItem.on('hover:enter', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        Lampa.Activity.push({
-                            component: item.component,
-                            page: 1
-                        });
+                menuItem.on('hover:enter', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('[Rezka] Opening:', item.component);
+                    Lampa.Activity.push({
+                        component: item.component,
+                        page: 1
                     });
-                    
-                    menu.append(menuItem);
                 });
                 
-                console.log('[Rezka] Menu items added');
-            }
+                menu.append(menuItem);
+            });
+            
+            console.log('[Rezka] Menu items added');
         }, 1000);
     }
     
