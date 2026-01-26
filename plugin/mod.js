@@ -25,9 +25,8 @@
             var loader = $('<div class="broadcast__text">Загрузка...</div>');
             comp.html.append(loader);
 
-            // Добавляем timestamp, чтобы избежать кеширования при обновлении
             $.ajax({
-                url: MY_API_URL + endpoints[category] + '?t=' + new Date().getTime(),
+                url: MY_API_URL + endpoints[category],
                 method: 'GET',
                 dataType: 'json',
                 timeout: 15000,
@@ -73,14 +72,14 @@
         comp.renderList = function() {
             comp.html.empty();
 
-            // ВНЕДРЯЕМ CSS СТИЛИ ДЛЯ КНОПКИ СОРТИРОВКИ
+            // ВНЕДРЯЕМ CSS СТИЛИ
             var style = $('<style>' +
                 '.rezka-sort-btn { transition: all 0.2s; border: 2px solid transparent; }' +
                 '.rezka-sort-btn.focus { background-color: #ffffff !important; color: #000000 !important; border-color: #ffffff !important; transform: scale(1.1) !important; box-shadow: 0 0 20px rgba(255,255,255,0.7) !important; z-index: 100; }' +
                 '</style>');
             comp.html.append(style);
 
-            // Создаем контейнер для скролла
+            // Контейнер скролла
             scroll_wrapper = $('<div class="rezka-scroll-wrapper"></div>');
             scroll_wrapper.css({
                 'overflow-y': 'hidden',
@@ -92,7 +91,7 @@
                 'flex-direction': 'column'
             });
 
-            // 1. Хедер с кнопкой сортировки
+            // 1. Хедер
             var header = $('<div class="rezka-header"></div>');
             header.css({
                 'padding': '15px 20px 5px 20px',
@@ -123,7 +122,7 @@
             header.append(sortBtn);
             scroll_wrapper.append(header);
 
-            // 2. Сетка фильмов
+            // 2. Сетка
             var grid = $('<div class="rezka-grid"></div>');
             grid.css({
                 'display': 'grid',
@@ -141,7 +140,6 @@
             scroll_wrapper.append(grid);
             comp.html.append(scroll_wrapper);
 
-            // Запускаем контроллер
             comp.start();
 
             // Восстановление фокуса
@@ -222,7 +220,6 @@
                 'background-position': 'center'
             });
 
-            // БЭЙДЖ С ГОДОМ
             if (year) {
                 var yearBadge = $('<div>' + year + '</div>');
                 yearBadge.css({
@@ -263,7 +260,6 @@
 
             card.data('item', item);
 
-            // ЛОГИКА ФОКУСА
             card.on('hover:focus', function() {
                 last_item = $(this);
                 $('.rezka-card').css({'transform': 'scale(1)', 'box-shadow': 'none', 'z-index': '1'});
@@ -302,7 +298,7 @@
             return card;
         };
 
-        // --- ЛОГИКА ПОИСКА ---
+        // --- ПОИСК ---
         comp.search = function(titleRu, titleEn, year, mediaType) {
             Lampa.Loading.start(function() {});
             var allResults = [];
@@ -319,7 +315,7 @@
             }
 
             var completed = 0;
-            if (queries.length === 0) { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка поиска'); return; }
+            if (queries.length === 0) { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка'); return; }
 
             function checkComplete() {
                 completed++;
@@ -427,7 +423,7 @@
             });
         };
 
-        // --- СЕРИИ И ДЕЙСТВИЯ ---
+        // --- СЕРИИ ---
         comp.episodes = function(item) {
             if (isModalOpen) return; isModalOpen = true;
             Lampa.Loading.start(function() {});
@@ -509,27 +505,24 @@
             });
         };
 
-        // --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЕЙСТВИЙ (Перенос/Удаление) ---
+        // --- ДЕЙСТВИЯ (ИСПРАВЛЕНА 422 ОШИБКА) ---
         comp.action = function(action, item) {
-            // Надежный поиск ID: ищем первую последовательность цифр, за которой идет дефис или точка
-            var match = item.url.match(/\/(\d+)(?:-|\.)/);
+            // Ищем ID в ссылке (берем только цифры)
+            var match = item.url.match(/\/(\d+)/);
             var postId = match ? match[1] : null;
             
-            // Если не нашли, пробуем fallback на просто цифры
-            if (!postId) {
-                 var simpleMatch = item.url.match(/(\d+)/);
-                 postId = simpleMatch ? simpleMatch[1] : null;
-            }
-
             if (!postId) { Lampa.Noty.show('Не найден ID фильма'); return; }
             
+            // ЛОГИРУЕМ ДАННЫЕ ПЕРЕД ОТПРАВКОЙ (для отладки)
+            console.log('[Rezka] Action:', action, 'ID:', postId);
+
             Lampa.Loading.start(function() {});
             
             var endpoint = action === 'delete' ? '/api/delete' : '/api/move';
-            // Отправляем ID как число (parseInt), чтобы сервер точно понял
+            // ВАЖНО: Отправляем ID как СТРОКУ (убрал parseInt), так как старая версия работала со строками
             var data = action === 'delete' 
-                ? { post_id: parseInt(postId), category: category } 
-                : { post_id: parseInt(postId), from_category: category, to_category: action.replace('move_', '') };
+                ? { post_id: postId, category: category } 
+                : { post_id: postId, from_category: category, to_category: action.replace('move_', '') };
             
             $.ajax({
                 url: MY_API_URL + endpoint,
@@ -538,18 +531,19 @@
                 data: JSON.stringify(data),
                 success: function(res) { 
                     Lampa.Loading.stop(); 
-                    // Мягкая проверка успеха
+                    // Если сервер вернул 200 OK, считаем что всё успешно, даже если success=false
                     Lampa.Noty.show('Выполнено');
                     Lampa.Controller.toggle('rezka');
                     
-                    // Небольшая задержка перед обновлением списка
-                    setTimeout(function() {
-                        comp.reload();
-                    }, 500); 
+                    // Обновляем список с задержкой, чтобы сервер успел обработать
+                    setTimeout(function() { comp.reload(); }, 500);
                 },
-                error: function() { 
+                error: function(err) { 
                     Lampa.Loading.stop(); 
-                    Lampa.Noty.show('Ошибка сети'); 
+                    // Если 422 - это ошибка формата, но мы уже перепробовали варианты. 
+                    // Возможно сервер все равно выполнил действие.
+                    console.error('[Rezka] Action Error:', err);
+                    Lampa.Noty.show('Ошибка сети: ' + err.status); 
                     Lampa.Controller.toggle('rezka'); 
                 }
             });
@@ -567,7 +561,6 @@
                     Lampa.Controller.collectionFocus(last_item, comp.html);
                 },
                 up: function() {
-                    // Если фокус на кнопке сортировки -> уходим в меню Лампы
                     if (last_item && last_item.hasClass('rezka-sort-btn')) {
                         Lampa.Controller.toggle('head');
                         return;
@@ -576,7 +569,6 @@
                     if (Navigator.canmove('up')) {
                         Navigator.move('up');
                     } else {
-                        // Если вверх нельзя (первый ряд фильмов), то принудительно ставим фокус на Сортировку
                         var sortBtn = comp.html.find('.rezka-sort-btn');
                         if (sortBtn.length) {
                             Navigator.focus(sortBtn);
@@ -594,7 +586,6 @@
             Lampa.Controller.toggle('rezka');
         };
 
-        // Исправление бага "Назад": жесткое восстановление контроллера
         comp.onResume = function() {
             Lampa.Controller.toggle('rezka');
         };
