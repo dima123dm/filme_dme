@@ -12,9 +12,12 @@
             var loader = $('<div class="empty__descr">Загрузка...</div>');
             comp.html.append(loader);
 
-            fetch(MY_API_URL + '/api/watching')
-                .then(r => r.json())
-                .then(items => {
+            // Используем jQuery.ajax вместо fetch для лучшей совместимости
+            $.ajax({
+                url: MY_API_URL + '/api/watching',
+                method: 'GET',
+                dataType: 'json',
+                success: function(items) {
                     loader.remove();
                     if (items && items.length) {
                         comp.renderItems(items);
@@ -22,11 +25,12 @@
                         comp.html.append('<div class="empty__descr">Список пуст</div>');
                     }
                     Lampa.Controller.toggle('content');
-                })
-                .catch(err => {
-                    loader.text('Ошибка загрузки: ' + err.message);
-                    console.error(err);
-                });
+                },
+                error: function(err) {
+                    loader.text('Ошибка загрузки: ' + (err.statusText || 'Неизвестная ошибка'));
+                    console.error('[Rezka Plugin] Error loading:', err);
+                }
+            });
 
             return comp.html;
         };
@@ -50,74 +54,70 @@
             var body = $('<div class="category-full__body" style="display:flex;flex-wrap:wrap;gap:12px;padding-bottom:2em"></div>');
 
             items.forEach(function (item) {
+                console.log('[Rezka Plugin] Processing item:', item);
+                
                 let title = item.title || '';
                 let year = '';
+                
+                // Извлекаем год из title
                 const yearMatch = title.match(/\((\d{4})\)/);
                 if (yearMatch) {
                     year = yearMatch[1];
                     title = title.replace(` (${year})`, '');
                 }
+                
+                // Очищаем название (убираем альтернативные названия после /)
                 let cleanTitle = title.split(' / ')[0].split(':')[0].trim();
 
+                // Определяем тип контента
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 
-                // Извлекаем ID из URL (например, /series/fantastic-and-where-to-find-them/42009-black-mirror.html -> 42009)
-                let tmdbId = null;
-                const urlMatch = (item.url || '').match(/\/(\d+)-[^/]+\.html/);
-                if (urlMatch) {
-                    tmdbId = urlMatch[1];
-                }
-
-                // ВСЕГДА используем прокси для постеров (обходим проблему CORS)
-                let imgUrl = item.poster || '';
-                if (imgUrl && imgUrl.startsWith('http')) {
-                    imgUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(imgUrl);
+                // Формируем URL картинки ВСЕГДА через прокси
+                let imgUrl = '';
+                if (item.poster && item.poster.length > 0) {
+                    // Проверяем, что постер - это валидный URL
+                    if (item.poster.startsWith('http://') || item.poster.startsWith('https://')) {
+                        imgUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster);
+                    } else {
+                        console.warn('[Rezka Plugin] Invalid poster URL:', item.poster);
+                        imgUrl = 'https://via.placeholder.com/300x450/333/fff?text=' + encodeURIComponent('No Image');
+                    }
                 } else {
-                    imgUrl = 'https://via.placeholder.com/300x450?text=No+image';
+                    imgUrl = 'https://via.placeholder.com/300x450/333/fff?text=' + encodeURIComponent(cleanTitle);
                 }
+                
+                console.log('[Rezka Plugin] Image URL:', imgUrl);
 
+                // Создаем карточку
                 var card = Lampa.Template.get('card', {
-                    title: item.title,
+                    title: title,
                     original_title: cleanTitle,
-                    release_year: item.status || year,
+                    release_year: item.status || year || '',
                     img: imgUrl
                 });
 
                 card.addClass('card--collection');
-                card.css({ width: '16.6%', minWidth: '140px' });
+                card.css({ 
+                    width: '16.6%', 
+                    minWidth: '140px',
+                    cursor: 'pointer'
+                });
 
-                // Открытие карточки фильма
+                // Функция открытия карточки
                 function openItem() {
-                    if (tmdbId) {
-                        // Переход на карточку фильма/сериала
-                        Lampa.Activity.push({
-                            url: '',
-                            component: 'full',
-                            id: tmdbId,
-                            method: isTv ? 'tv' : 'movie',
-                            card: {
-                                id: tmdbId,
-                                title: cleanTitle,
-                                original_title: cleanTitle,
-                                release_date: year,
-                                first_air_date: year,
-                                poster_path: item.poster,
-                                overview: '',
-                                vote_average: 0
-                            },
-                            source: 'tmdb'
-                        });
-                    } else {
-                        // Fallback - поиск по названию
-                        Lampa.Activity.push({
-                            component: 'search',
-                            query: cleanTitle + (year ? ' ' + year : ''),
-                            year: year,
-                            type: isTv ? 'tv' : 'movie'
-                        });
-                    }
+                    console.log('[Rezka Plugin] Opening:', cleanTitle, year, isTv);
+                    
+                    // Используем ПОИСК вместо прямой ссылки, так как TMDB ID != HDRezka ID
+                    Lampa.Activity.push({
+                        component: 'search',
+                        search: cleanTitle,
+                        search_one: cleanTitle,
+                        search_two: year,
+                        clarification: true
+                    });
                 }
 
+                // Привязываем события
                 card.on('hover:enter', openItem);
                 card.on('click', openItem);
 
@@ -131,22 +131,35 @@
         return comp;
     }
 
-    // Регистрация
+    // Регистрация плагина
     Lampa.Listener.follow('app', function (e) {
         if (e.type === 'ready') {
+            console.log('[Rezka Plugin] Initializing...');
+            
+            // Добавляем пункт меню если его ещё нет
             if ($('[data-action="my_rezka_open"]').length === 0) {
                 $('.menu .menu__list').eq(0).append(
                     '<li class="menu__item selector" data-action="my_rezka_open">' +
-                    '<div class="menu__ico">R</div>' +
+                    '<div class="menu__ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>' +
                     '<div class="menu__text">Rezka</div></li>'
                 );
+                console.log('[Rezka Plugin] Menu item added');
             }
 
+            // Обработчик клика
             $('body').off('click.myrezka').on('click.myrezka', '[data-action="my_rezka_open"]', function () {
-                Lampa.Activity.push({ component: 'my_rezka', type: 'component' });
+                console.log('[Rezka Plugin] Menu clicked');
+                Lampa.Activity.push({ 
+                    component: 'my_rezka',
+                    page: 1
+                });
             });
 
+            // Регистрируем компонент
             Lampa.Component.add('my_rezka', MyRezkaComponent);
+            console.log('[Rezka Plugin] Component registered');
         }
     });
+    
+    console.log('[Rezka Plugin] Script loaded');
 })();
