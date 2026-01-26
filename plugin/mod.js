@@ -8,15 +8,17 @@
     
     function RezkaComponent(object) {
         var component = this;
-        this.html = $('<div class="items items--lines"></div>');
-        this.loading = false;
+        var container = document.createElement('div');
+        container.className = 'items items--lines';
         
         this.create = function() {
             console.log('[REZKA] Creating component');
-            this.html.empty();
+            container.innerHTML = '';
             
-            var loader = $('<div class="empty__descr">Загрузка...</div>');
-            this.html.append(loader);
+            var loader = document.createElement('div');
+            loader.className = 'empty__descr';
+            loader.textContent = 'Загрузка...';
+            container.appendChild(loader);
             
             var xhr = new XMLHttpRequest();
             xhr.open('GET', API_URL + '/api/watching', true);
@@ -24,66 +26,80 @@
             
             xhr.onload = function() {
                 try {
-                    loader.remove();
+                    if (loader.parentNode) {
+                        loader.parentNode.removeChild(loader);
+                    }
+                    
                     if (xhr.status === 200) {
                         var items = JSON.parse(xhr.responseText);
                         console.log('[REZKA] Loaded:', items.length, 'items');
+                        
                         if (items && items.length > 0) {
                             component.renderItems(items);
                         } else {
-                            component.html.append('<div class="empty__descr">Список пуст</div>');
+                            var empty = document.createElement('div');
+                            empty.className = 'empty__descr';
+                            empty.textContent = 'Список пуст';
+                            container.appendChild(empty);
                         }
-                        Lampa.Controller.toggle('content');
+                        
+                        if (Lampa.Controller) {
+                            Lampa.Controller.toggle('content');
+                        }
                     } else {
-                        component.html.append('<div class="empty__descr">Ошибка: ' + xhr.status + '</div>');
+                        var error = document.createElement('div');
+                        error.className = 'empty__descr';
+                        error.textContent = 'Ошибка: ' + xhr.status;
+                        container.appendChild(error);
                     }
                 } catch(e) {
                     console.error('[REZKA] Error:', e);
-                    component.html.append('<div class="empty__descr">Ошибка загрузки</div>');
+                    var error = document.createElement('div');
+                    error.className = 'empty__descr';
+                    error.textContent = 'Ошибка загрузки';
+                    container.appendChild(error);
                 }
             };
             
             xhr.onerror = function() {
                 console.error('[REZKA] Network error');
-                loader.text('Ошибка сети');
+                if (loader.parentNode) {
+                    loader.textContent = 'Ошибка сети';
+                }
             };
             
             xhr.ontimeout = function() {
                 console.error('[REZKA] Timeout');
-                loader.text('Превышено время ожидания');
+                if (loader.parentNode) {
+                    loader.textContent = 'Превышено время ожидания';
+                }
             };
             
             xhr.send();
             
-            return this.html;
+            return container;
         };
         
         this.renderItems = function(items) {
             console.log('[REZKA] Rendering', items.length, 'cards');
             
-            var grid = $('<div class="rezka-grid"></div>');
-            grid.css({
-                'display': 'grid',
-                'grid-template-columns': 'repeat(auto-fill, minmax(150px, 1fr))',
-                'gap': '20px',
-                'padding': '20px',
-                'width': '100%'
-            });
+            var grid = document.createElement('div');
+            grid.className = 'rezka-grid';
+            grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:20px;padding:20px;width:100%';
             
             for (var i = 0; i < items.length; i++) {
-                var item = items[i];
-                var card = component.createCard(item);
-                grid.append(card);
+                var card = component.createCard(items[i]);
+                grid.appendChild(card);
             }
             
-            this.html.append(grid);
+            container.appendChild(grid);
         };
         
         this.createCard = function(item) {
             var title = item.title || '';
             var poster = item.poster ? API_URL + '/api/img?url=' + encodeURIComponent(item.poster) : '';
             
-            // Парсинг названия
+            // Парсинг
             var yearMatch = title.match(/\((\d{4})\)/);
             var year = yearMatch ? yearMatch[1] : '';
             var titleClean = title.replace(/\s*\(\d{4}\)/, '').trim();
@@ -91,79 +107,56 @@
             var titleRu = parts[0].trim();
             var titleEn = parts[1] ? parts[1].trim() : '';
             
-            // Определение типа
             var isTV = /\/series\/|\/cartoons\//.test(item.url || '');
             var mediaType = isTV ? 'tv' : 'movie';
             
-            // Создание карточки
-            var card = $('<div class="rezka-card selector"></div>');
-            card.css({
-                'position': 'relative',
-                'cursor': 'pointer',
-                'border-radius': '10px',
-                'overflow': 'hidden',
-                'background-color': '#1a1a1a'
-            });
+            // Карточка
+            var card = document.createElement('div');
+            card.className = 'rezka-card selector';
+            card.style.cssText = 'position:relative;cursor:pointer;border-radius:10px;overflow:hidden;background-color:#1a1a1a';
             
             // Постер
-            var posterDiv = $('<div></div>');
-            posterDiv.css({
-                'width': '100%',
-                'padding-bottom': '150%',
-                'position': 'relative',
-                'background-image': poster ? 'url(' + poster + ')' : 'none',
-                'background-color': '#2a2a2a',
-                'background-size': 'cover',
-                'background-position': 'center'
-            });
+            var posterDiv = document.createElement('div');
+            posterDiv.style.cssText = 'width:100%;padding-bottom:150%;position:relative;' + 
+                                     (poster ? 'background-image:url(' + poster + ');' : '') +
+                                     'background-color:#2a2a2a;background-size:cover;background-position:center';
             
             // Статус
             if (item.status) {
-                var badge = $('<div></div>');
-                badge.text(item.status);
-                badge.css({
-                    'position': 'absolute',
-                    'bottom': '0',
-                    'left': '0',
-                    'right': '0',
-                    'padding': '5px',
-                    'background': 'rgba(0,0,0,0.9)',
-                    'color': '#fff',
-                    'font-size': '11px',
-                    'text-align': 'center'
-                });
-                posterDiv.append(badge);
+                var badge = document.createElement('div');
+                badge.textContent = item.status;
+                badge.style.cssText = 'position:absolute;bottom:0;left:0;right:0;padding:5px;background:rgba(0,0,0,0.9);color:#fff;font-size:11px;text-align:center';
+                posterDiv.appendChild(badge);
             }
             
-            card.append(posterDiv);
+            card.appendChild(posterDiv);
             
             // Название
-            var titleDiv = $('<div></div>');
-            titleDiv.text(titleRu);
-            titleDiv.css({
-                'padding': '10px',
-                'font-size': '13px',
-                'color': '#fff',
-                'text-align': 'center',
-                'min-height': '50px'
-            });
-            card.append(titleDiv);
+            var titleDiv = document.createElement('div');
+            titleDiv.textContent = titleRu;
+            titleDiv.style.cssText = 'padding:10px;font-size:13px;color:#fff;text-align:center;min-height:50px';
+            card.appendChild(titleDiv);
             
-            // Обработчик клика
+            // Клик
             var clickHandler = function() {
                 console.log('[REZKA] Click:', titleRu);
                 component.openCard(titleRu, titleEn, year, mediaType);
             };
             
-            card.on('click', clickHandler);
-            card.on('hover:enter', clickHandler);
+            card.addEventListener('click', clickHandler);
+            
+            // Для пульта ТВ
+            card.addEventListener('hover:enter', clickHandler);
             
             return card;
         };
         
         this.openCard = function(titleRu, titleEn, year, mediaType) {
             console.log('[REZKA] Opening:', titleRu);
-            Lampa.Loading.start(function() {});
+            
+            if (Lampa.Loading) {
+                Lampa.Loading.start(function() {});
+            }
             
             var searchUrl = 'https://api.themoviedb.org/3/search/' + mediaType + 
                           '?api_key=' + TMDB_KEY + 
@@ -177,7 +170,10 @@
             xhr.open('GET', searchUrl, true);
             
             xhr.onload = function() {
-                Lampa.Loading.stop();
+                if (Lampa.Loading) {
+                    Lampa.Loading.stop();
+                }
+                
                 try {
                     if (xhr.status === 200) {
                         var data = JSON.parse(xhr.responseText);
@@ -197,18 +193,26 @@
                                 }
                             });
                         } else {
-                            Lampa.Noty.show('Не найдено в TMDB');
+                            if (Lampa.Noty) {
+                                Lampa.Noty.show('Не найдено в TMDB');
+                            }
                         }
                     }
                 } catch(e) {
                     console.error('[REZKA] TMDB error:', e);
-                    Lampa.Noty.show('Ошибка поиска');
+                    if (Lampa.Noty) {
+                        Lampa.Noty.show('Ошибка поиска');
+                    }
                 }
             };
             
             xhr.onerror = function() {
-                Lampa.Loading.stop();
-                Lampa.Noty.show('Ошибка подключения');
+                if (Lampa.Loading) {
+                    Lampa.Loading.stop();
+                }
+                if (Lampa.Noty) {
+                    Lampa.Noty.show('Ошибка подключения');
+                }
             };
             
             xhr.send();
@@ -216,16 +220,21 @@
         
         this.start = function() {
             console.log('[REZKA] Start');
-            Lampa.Controller.toggle('content');
+            if (Lampa.Controller) {
+                Lampa.Controller.toggle('content');
+            }
         };
         
         this.pause = function() {};
         this.stop = function() {};
         this.destroy = function() {
-            this.html.remove();
+            if (container.parentNode) {
+                container.parentNode.removeChild(container);
+            }
         };
+        
         this.render = function() {
-            return this.html;
+            return container;
         };
         
         return this;
@@ -246,52 +255,62 @@
         
         // Добавляем в меню
         setTimeout(function() {
-            if ($('[data-action="my_rezka_open"]').length === 0) {
-                console.log('[REZKA] Adding menu item');
-                var menu = $('.menu .menu__list').eq(0);
-                if (menu.length) {
-                    menu.append(
-                        '<li class="menu__item selector" data-action="my_rezka_open">' +
-                        '<div class="menu__ico">' +
-                        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
-                        '<path d="M12 2L2 7L12 12L22 7L12 2Z"/>' +
-                        '<path d="M2 17L12 22L22 17"/>' +
-                        '<path d="M2 12L12 17L22 12"/>' +
-                        '</svg>' +
-                        '</div>' +
-                        '<div class="menu__text">Rezka</div>' +
-                        '</li>'
-                    );
-                    
-                    // Обработчик клика
-                    $('body').on('click', '[data-action="my_rezka_open"]', function(e) {
-                        console.log('[REZKA] Menu clicked');
-                        e.preventDefault();
-                        e.stopPropagation();
-                        Lampa.Activity.push({
-                            component: 'my_rezka',
-                            page: 1
-                        });
-                    });
-                    
-                    // Для пульта ТВ
-                    $('body').on('hover:enter', '[data-action="my_rezka_open"]', function(e) {
-                        console.log('[REZKA] Menu enter');
-                        e.preventDefault();
-                        e.stopPropagation();
-                        Lampa.Activity.push({
-                            component: 'my_rezka',
-                            page: 1
-                        });
-                    });
-                    
-                    console.log('[REZKA] Menu item added');
-                }
+            var menuList = document.querySelector('.menu .menu__list');
+            if (!menuList) {
+                console.error('[REZKA] Menu not found');
+                return;
             }
+            
+            var existingItem = document.querySelector('[data-action="my_rezka_open"]');
+            if (existingItem) {
+                console.log('[REZKA] Menu item already exists');
+                return;
+            }
+            
+            console.log('[REZKA] Adding menu item');
+            
+            var menuItem = document.createElement('li');
+            menuItem.className = 'menu__item selector';
+            menuItem.setAttribute('data-action', 'my_rezka_open');
+            menuItem.innerHTML = 
+                '<div class="menu__ico">' +
+                '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<path d="M12 2L2 7L12 12L22 7L12 2Z"/>' +
+                '<path d="M2 17L12 22L22 17"/>' +
+                '<path d="M2 12L12 17L22 12"/>' +
+                '</svg>' +
+                '</div>' +
+                '<div class="menu__text">Rezka</div>';
+            
+            menuList.appendChild(menuItem);
+            
+            // Обработчик клика
+            menuItem.addEventListener('click', function(e) {
+                console.log('[REZKA] Menu clicked');
+                e.preventDefault();
+                e.stopPropagation();
+                Lampa.Activity.push({
+                    component: 'my_rezka',
+                    page: 1
+                });
+            });
+            
+            // Для пульта
+            menuItem.addEventListener('hover:enter', function(e) {
+                console.log('[REZKA] Menu enter');
+                e.preventDefault();
+                e.stopPropagation();
+                Lampa.Activity.push({
+                    component: 'my_rezka',
+                    page: 1
+                });
+            });
+            
+            console.log('[REZKA] Menu item added');
         }, 1000);
     }
     
-    // Запуск при готовности Lampa
+    // Запуск
     if (window.Lampa) {
         if (Lampa.Listener) {
             Lampa.Listener.follow('app', function(e) {
