@@ -1,9 +1,8 @@
 (function () {
     'use strict';
 
-    // ВАЖНО: Адрес вашего сервера (VPS).
-    // Если поменять на 127.0.0.1, то работать будет ТОЛЬКО на том же компьютере, где сервер.
-    var MY_API_URL = 'https://filme.64.188.67.85.sslip.io:8080';
+    // Прямой адрес сервера
+    var MY_API_URL = 'http://64.188.67.85:8080';
 
     function MyRezkaComponent(object) {
         var comp = new Lampa.Component(object, {
@@ -14,36 +13,53 @@
         comp.create = function () {
             this.activity.loader(true);
             
-            // Запрос к API
-            Lampa.Network.silent(MY_API_URL + '/api/watching', function (json) {
-                comp.activity.loader(false);
-                
-                if (json && json.length) {
-                    var items = [];
-                    json.forEach(function(item){
-                        items.push({
-                            title: item.title,
-                            original_title: item.title,
-                            img: item.poster,
-                            // Важно: по этому полю Лампа будет искать (Search)
-                            query: item.title 
+            // УВЕДОМЛЕНИЕ 1: Сообщаем о начале попытки
+            Lampa.Noty.show('Rezka: Старт соединения...');
+            console.log('Rezka: Start request to ' + MY_API_URL);
+
+            var url = MY_API_URL + '/api/watching';
+            
+            // Используем fetch вместо Lampa.Network для детальной ошибки
+            fetch(url)
+                .then(function(response) {
+                    // Если сервер ответил, но с ошибкой (например, 404 или 500)
+                    if (!response.ok) {
+                        throw new Error('HTTP статус ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(function(json) {
+                    comp.activity.loader(false);
+                    // УВЕДОМЛЕНИЕ 2: Успех
+                    Lampa.Noty.show('Rezka: Успех! Фильмов: ' + (json ? json.length : 0));
+                    
+                    if (json && json.length) {
+                        var items = [];
+                        json.forEach(function(item){
+                            items.push({
+                                title: item.title,
+                                original_title: item.title,
+                                img: item.poster,
+                                query: item.title
+                            });
                         });
-                    });
-                    comp.render_list(items);
-                } else {
-                    comp.empty('Список пуст');
-                }
-            }, function (a, c) {
-                comp.activity.loader(false);
-                // Показываем ошибку с адресом, чтобы было понятно, куда не достучались
-                comp.empty('Ошибка: ' + MY_API_URL + ' (' + c + ')');
-            });
+                        comp.render_list(items);
+                    } else {
+                        comp.empty('Список пуст (вернулся пустой массив)');
+                    }
+                })
+                .catch(function(error) {
+                    comp.activity.loader(false);
+                    // УВЕДОМЛЕНИЕ 3: Ошибка
+                    Lampa.Noty.show('Rezka Ошибка: ' + error.message);
+                    comp.empty('Сбой: ' + error.message);
+                    console.error('Rezka Error:', error);
+                });
             
             return this.render();
         };
 
         comp.on_click = function (item) {
-            // При клике отправляем название фильма в поиск Лампы
             Lampa.Activity.push({
                 component: 'search',
                 query: item.query
@@ -51,7 +67,7 @@
         };
 
         comp.render_list = function (items) {
-            var line = Lampa.Template.get('items_line', { title: 'Сейчас смотрю (Rezka)' });
+            var line = Lampa.Template.get('items_line', { title: 'Моя Rezka' });
             var list = line.find('.card-layer');
 
             items.forEach(function (item) {
@@ -70,7 +86,6 @@
         return comp;
     }
 
-    // Добавляем кнопку в боковое меню
     Lampa.Listener.follow('app', function (e) {
         if (e.type == 'ready') {
             $('.menu .menu__list').eq(0).append(
