@@ -10,6 +10,8 @@
         var component = this;
         var container = document.createElement('div');
         container.className = 'items items--lines';
+        var items_data = [];
+        var scroll = null;
         
         this.create = function() {
             console.log('[REZKA] Creating component');
@@ -35,6 +37,7 @@
                         console.log('[REZKA] Loaded:', items.length, 'items');
                         
                         if (items && items.length > 0) {
+                            items_data = items;
                             component.renderItems(items);
                         } else {
                             var empty = document.createElement('div');
@@ -43,9 +46,7 @@
                             container.appendChild(empty);
                         }
                         
-                        if (Lampa.Controller) {
-                            Lampa.Controller.toggle('content');
-                        }
+                        Lampa.Controller.enable('content');
                     } else {
                         var error = document.createElement('div');
                         error.className = 'empty__descr';
@@ -83,19 +84,29 @@
         this.renderItems = function(items) {
             console.log('[REZKA] Rendering', items.length, 'cards');
             
+            // Создаем scroll контейнер для навигации
+            scroll = new Lampa.Scroll({
+                horizontal: false,
+                step: 250
+            });
+            
             var grid = document.createElement('div');
             grid.className = 'rezka-grid';
             grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:20px;padding:20px;width:100%';
             
             for (var i = 0; i < items.length; i++) {
-                var card = component.createCard(items[i]);
+                var card = component.createCard(items[i], i);
                 grid.appendChild(card);
             }
             
-            container.appendChild(grid);
+            scroll.append(grid);
+            container.appendChild(scroll.render());
+            
+            // Активируем контроллер
+            component.start();
         };
         
-        this.createCard = function(item) {
+        this.createCard = function(item, index) {
             var title = item.title || '';
             var poster = item.poster ? API_URL + '/api/img?url=' + encodeURIComponent(item.poster) : '';
             
@@ -113,7 +124,8 @@
             // Карточка
             var card = document.createElement('div');
             card.className = 'rezka-card selector';
-            card.style.cssText = 'position:relative;cursor:pointer;border-radius:10px;overflow:hidden;background-color:#1a1a1a';
+            card.setAttribute('data-index', index);
+            card.style.cssText = 'position:relative;cursor:pointer;border-radius:10px;overflow:hidden;background-color:#1a1a1a;transition:transform 0.2s';
             
             // Постер
             var posterDiv = document.createElement('div');
@@ -134,19 +146,29 @@
             // Название
             var titleDiv = document.createElement('div');
             titleDiv.textContent = titleRu;
-            titleDiv.style.cssText = 'padding:10px;font-size:13px;color:#fff;text-align:center;min-height:50px';
+            titleDiv.style.cssText = 'padding:10px;font-size:13px;color:#fff;text-align:center;min-height:50px;display:flex;align-items:center;justify-content:center';
             card.appendChild(titleDiv);
             
+            // Hover эффект для пульта
+            card.addEventListener('hover:focus', function() {
+                card.style.transform = 'scale(1.05)';
+                card.style.boxShadow = '0 8px 20px rgba(255,255,255,0.3)';
+                card.style.zIndex = '10';
+            });
+            
+            card.addEventListener('hover:blur', function() {
+                card.style.transform = 'scale(1)';
+                card.style.boxShadow = 'none';
+                card.style.zIndex = '1';
+            });
+            
             // Клик
-            var clickHandler = function() {
-                console.log('[REZKA] Click:', titleRu);
+            card.addEventListener('hover:enter', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[REZKA] Enter on:', titleRu);
                 component.openCard(titleRu, titleEn, year, mediaType);
-            };
-            
-            card.addEventListener('click', clickHandler);
-            
-            // Для пульта ТВ
-            card.addEventListener('hover:enter', clickHandler);
+            });
             
             return card;
         };
@@ -154,9 +176,7 @@
         this.openCard = function(titleRu, titleEn, year, mediaType) {
             console.log('[REZKA] Opening:', titleRu);
             
-            if (Lampa.Loading) {
-                Lampa.Loading.start(function() {});
-            }
+            Lampa.Loading.start(function() {});
             
             var searchUrl = 'https://api.themoviedb.org/3/search/' + mediaType + 
                           '?api_key=' + TMDB_KEY + 
@@ -170,9 +190,7 @@
             xhr.open('GET', searchUrl, true);
             
             xhr.onload = function() {
-                if (Lampa.Loading) {
-                    Lampa.Loading.stop();
-                }
+                Lampa.Loading.stop();
                 
                 try {
                     if (xhr.status === 200) {
@@ -193,41 +211,69 @@
                                 }
                             });
                         } else {
-                            if (Lampa.Noty) {
-                                Lampa.Noty.show('Не найдено в TMDB');
-                            }
+                            Lampa.Noty.show('Не найдено в TMDB');
                         }
                     }
                 } catch(e) {
                     console.error('[REZKA] TMDB error:', e);
-                    if (Lampa.Noty) {
-                        Lampa.Noty.show('Ошибка поиска');
-                    }
+                    Lampa.Noty.show('Ошибка поиска');
                 }
             };
             
             xhr.onerror = function() {
-                if (Lampa.Loading) {
-                    Lampa.Loading.stop();
-                }
-                if (Lampa.Noty) {
-                    Lampa.Noty.show('Ошибка подключения');
-                }
+                Lampa.Loading.stop();
+                Lampa.Noty.show('Ошибка подключения');
             };
             
             xhr.send();
         };
         
         this.start = function() {
-            console.log('[REZKA] Start');
-            if (Lampa.Controller) {
-                Lampa.Controller.toggle('content');
-            }
+            console.log('[REZKA] Start - activating controller');
+            
+            var cards = container.querySelectorAll('.selector');
+            
+            Lampa.Controller.add('content', {
+                toggle: function() {
+                    var controller = this;
+                    
+                    Lampa.Controller.collectionSet(container);
+                    Lampa.Controller.collectionFocus(cards[0], container);
+                },
+                left: function() {
+                    if (Navigator.canmove('left')) Navigator.move('left');
+                    else Lampa.Controller.toggle('menu');
+                },
+                right: function() {
+                    Navigator.move('right');
+                },
+                up: function() {
+                    if (Navigator.canmove('up')) Navigator.move('up');
+                    else Lampa.Controller.toggle('head');
+                },
+                down: function() {
+                    if (Navigator.canmove('down')) Navigator.move('down');
+                },
+                back: function() {
+                    Lampa.Activity.backward();
+                }
+            });
+            
+            Lampa.Controller.toggle('content');
         };
         
-        this.pause = function() {};
-        this.stop = function() {};
+        this.pause = function() {
+            console.log('[REZKA] Pause');
+        };
+        
+        this.stop = function() {
+            console.log('[REZKA] Stop');
+        };
+        
         this.destroy = function() {
+            console.log('[REZKA] Destroy');
+            Lampa.Controller.clear();
+            if (scroll) scroll.destroy();
             if (container.parentNode) {
                 container.parentNode.removeChild(container);
             }
@@ -284,18 +330,7 @@
             
             menuList.appendChild(menuItem);
             
-            // Обработчик клика
-            menuItem.addEventListener('click', function(e) {
-                console.log('[REZKA] Menu clicked');
-                e.preventDefault();
-                e.stopPropagation();
-                Lampa.Activity.push({
-                    component: 'my_rezka',
-                    page: 1
-                });
-            });
-            
-            // Для пульта
+            // Обработчик для пульта
             menuItem.addEventListener('hover:enter', function(e) {
                 console.log('[REZKA] Menu enter');
                 e.preventDefault();
