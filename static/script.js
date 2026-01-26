@@ -131,6 +131,11 @@ async function openDetails(url, title, poster) {
     document.getElementById('det-title').innerText = title;
     document.getElementById('det-controls').style.display = 'none';
     
+    // --- НОВАЯ ЛОГИКА: Обновляем ссылку на сайт ---
+    const siteLink = document.getElementById('det-site-link');
+    if (siteLink) siteLink.href = url;
+    // ----------------------------------------------
+
     // Сброс
     currentPostId = null; 
     
