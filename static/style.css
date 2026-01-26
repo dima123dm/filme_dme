@@ -116,6 +116,13 @@ body {
     background: #ff3b30;
 }
 
+/* Внутри панели управления элементы переносятся на две колонки, 
+   чтобы кнопки не выходили за пределы экрана на маленьких устройствах. */
+.manage-box .btn-action {
+    flex: 1 1 calc(50% - 5px);
+    text-align: center;
+}
+
 /* --- МЕНЮ (Tab Bar) --- */
 .tab-bar {
     position: fixed;
@@ -214,6 +221,7 @@ body {
 .manage-box {
     padding: 15px;
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     background: var(--tg-theme-bg-color);

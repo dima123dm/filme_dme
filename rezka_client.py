@@ -467,19 +467,100 @@ class RezkaClient:
         if not self.auth():
             return False
         try:
-            headers = {"X-Requested-With": "XMLHttpRequest"}
+            # Формируем заголовки максимально близко к оригинальному запросу на сайте.
+            headers = {
+                "X-Requested-With": "XMLHttpRequest",
+                # Referer помогает серверу определить источник запроса; без него отметка может не сохраниться.
+                "Referer": self.origin,
+                "Origin": self.origin,
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            }
             r = self.session.post(
                 f"{self.origin}/engine/ajax/schedule_watched.php",
                 data={"id": global_id},
                 headers=headers,
             )
             try:
+                # Ожидаем JSON, содержащий success или status
                 data = r.json()
                 return bool(data.get("success", False) or data.get("status") == "ok")
             except Exception:
+                # В некоторых случаях сервер возвращает простую строку "ok"
                 return r.status_code == 200
         except Exception:
             return False
+
+    # ------------------------
+    # Поиск
+    # ------------------------
+    def search(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Выполняет поиск по сайту и возвращает список найденных фильмов/сериалов.
+
+        Используется внутренний механизм быстрого поиска HDRezka. Функция
+        отправляет POST-запрос на `/engine/ajax/search.php` и парсит HTML, 
+        возвращая элементы в формате, пригодном для выдачи интерфейсу.
+
+        :param query: Строка поискового запроса (не менее 3 символов)
+        :return: Список словарей с ключами id, title, url, poster
+        """
+        results: List[Dict[str, Any]] = []
+        if not query or len(query.strip()) < 3:
+            return results
+        # Авторизация не обязательна для поиска, но на всякий случай выполним
+        self.auth()
+        try:
+            headers = {
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": self.origin,
+                "Origin": self.origin,
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            }
+            # Быстрый поиск возвращает HTML в виде списка <li> элементов
+            r = self.session.post(
+                f"{self.origin}/engine/ajax/search.php",
+                data={"q": query},
+                headers=headers,
+            )
+            if r.status_code != 200:
+                return results
+            soup = BeautifulSoup(r.content, "html.parser")
+            # каждая запись в результатах находится в списке .b-search__section_list li
+            for li in soup.select(".b-search__section_list li"):
+                try:
+                    # anchor содержит ссылку на страницу
+                    anchor = li.find("a")
+                    if not anchor:
+                        continue
+                    url = anchor.get("href")
+                    # На сайте id объекта часто хранится в data-id атрибуте
+                    item_id = anchor.get("data-id") or li.get("data-id") or None
+                    # Название находится в спане с классом enty
+                    title_span = li.find("span", class_="enty")
+                    title = title_span.get_text(strip=True) if title_span else anchor.get_text(strip=True)
+                    # Рейтинг может быть в span.rating
+                    rating_span = li.find("span", class_="rating")
+                    rating = None
+                    if rating_span:
+                        try:
+                            rating = float(rating_span.get_text())
+                        except Exception:
+                            rating = None
+                    # Обложка в тег img внутри li
+                    img = li.find("img")
+                    poster = img.get("src") if img else ""
+                    results.append({
+                        "id": item_id or url,
+                        "title": title,
+                        "url": url,
+                        "poster": poster,
+                        "rating": rating,
+                    })
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return results
 
     # ------------------------
     # Работа с франшизами
