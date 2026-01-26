@@ -46,9 +46,12 @@ class RezkaClient:
             )
             if r.json().get("success"):
                 self.is_logged_in = True
+                print("✅ Авторизация успешна")
                 return True
-        except Exception:
-            pass
+            else:
+                print(f"❌ Ошибка авторизации: {r.text}")
+        except Exception as e:
+            print(f"❌ Ошибка подключения при авторизации: {e}")
         return False
 
     # ------------------------
@@ -199,6 +202,14 @@ class RezkaClient:
             return {"error": "Auth failed"}
         try:
             r = self.session.get(url)
+            # Если страница ведёт на другой домен (например, .sh), обновляем origin
+            try:
+                parsed = urlparse(r.url)
+                if parsed.scheme and parsed.netloc:
+                    self.origin = f"{parsed.scheme}://{parsed.netloc}"
+            except Exception:
+                pass
+
             html_text = r.text
             soup = BeautifulSoup(html_text, "html.parser")
             # Постер
@@ -479,12 +490,15 @@ class RezkaClient:
                 "Referer": ref,
                 "Origin": self.origin,
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
             }
+            print(f"DEBUG: Отправка Toggle Watch ID={global_id}")
             r = self.session.post(
                 f"{self.origin}/engine/ajax/schedule_watched.php",
                 data={"id": global_id},
                 headers=headers,
             )
+            print(f"DEBUG: Ответ сервера Toggle: Code={r.status_code}, Body={r.text}")
             try:
                 # Ожидаем JSON, содержащий success или status
                 data = r.json()
@@ -492,7 +506,8 @@ class RezkaClient:
             except Exception:
                 # В некоторых случаях сервер возвращает простую строку "ok"
                 return r.status_code == 200
-        except Exception:
+        except Exception as e:
+            print(f"ERROR: Ошибка Toggle Watch: {e}")
             return False
 
     # ------------------------

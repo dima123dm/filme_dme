@@ -7,7 +7,7 @@ from aiogram.filters import Command
 from aiogram.types import WebAppInfo
 from dotenv import load_dotenv
 
-# Импортируем клиент, чтобы использовать его и в боте, и в main.py
+# Импортируем клиент
 from rezka_client import RezkaClient
 
 load_dotenv()
@@ -17,7 +17,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- КОНФИГУРАЦИЯ ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ИСПРАВЛЕНО: Берем TELEGRAM_BOT_TOKEN, как в твоем .env
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 WEBAPP_URL = os.getenv("WEBAPP_URL", "http://127.0.0.1:8080")
 CAT_WATCHING = os.getenv("REZKA_CAT_WATCHING")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -25,9 +26,9 @@ STATE_FILE = "series_state.json"
 
 # --- ИНИЦИАЛИЗАЦИЯ ---
 if not BOT_TOKEN:
-    logger.error("❌ Ошибка: Не задан BOT_TOKEN в .env")
+    logger.error("❌ Ошибка: Не задан TELEGRAM_BOT_TOKEN в .env файле!")
 
-# Создаем объекты здесь, чтобы main.py мог их импортировать
+# Создаем объекты
 client = RezkaClient()
 bot = Bot(token=BOT_TOKEN) if BOT_TOKEN else None
 dp = Dispatcher()
@@ -53,7 +54,6 @@ def save_state(state):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     global TELEGRAM_CHAT_ID
-    # Запоминаем ID чата, если он не задан в .env
     if not TELEGRAM_CHAT_ID:
         TELEGRAM_CHAT_ID = str(message.chat.id)
         logger.info(f"✅ Chat ID установлен: {TELEGRAM_CHAT_ID}")
@@ -62,8 +62,8 @@ async def cmd_start(message: types.Message):
         [types.InlineKeyboardButton(text="🎬 Открыть HDRezka", web_app=WebAppInfo(url=WEBAPP_URL))]
     ])
     await message.answer(
-        "👋 Привет! Я буду присылать уведомления о новых сериях из раздела 'Смотрю'.\n"
-        "Нажми кнопку ниже, чтобы открыть библиотеку.",
+        "👋 Привет! Я буду присылать уведомления о новых сериях.\n"
+        "Нажми кнопку ниже, чтобы открыть приложение.",
         reply_markup=markup
     )
 
@@ -71,14 +71,16 @@ async def cmd_start(message: types.Message):
 async def check_updates_task():
     """Периодически проверяет выход новых серий."""
     if not bot:
+        logger.warning("⚠️ Бот не инициализирован (нет токена), проверка обновлений отключена.")
         return
 
     logger.info("⏳ Фоновая проверка обновлений запущена...")
-    await asyncio.sleep(5)  # Ждем старта сервера
+    await asyncio.sleep(5)
 
     while True:
         try:
             if not TELEGRAM_CHAT_ID:
+                # Ждем, пока юзер напишет /start
                 await asyncio.sleep(30)
                 continue
 
@@ -87,10 +89,10 @@ async def check_updates_task():
                 await asyncio.sleep(60)
                 continue
 
-            logger.info("🔄 Проверка новых серий...")
+            # logger.info("🔄 Проверка новых серий...")
             state = load_state()
             
-            # Получаем список "Смотрю" (запускаем синхронный код в потоке)
+            # Получаем список "Смотрю"
             watchlist = await asyncio.to_thread(client.get_category_items, CAT_WATCHING)
             
             for item in watchlist:
@@ -101,7 +103,7 @@ async def check_updates_task():
                     
                     if not url or not item_id: continue
 
-                    # Загружаем детали (в потоке)
+                    # Загружаем детали
                     details = await asyncio.to_thread(client.get_series_details, url)
                     if not details or "seasons" not in details:
                         continue
@@ -151,13 +153,13 @@ async def check_updates_task():
                             logger.error(f"Ошибка отправки: {e}")
 
                 except Exception as e:
-                    logger.error(f"Ошибка проверки {item.get('title')}: {e}")
+                    # logger.error(f"Ошибка проверки {item.get('title')}: {e}")
                     continue
                 
-                await asyncio.sleep(2) # Пауза между запросами
+                await asyncio.sleep(2)
 
             save_state(state)
-            logger.info("✅ Проверка завершена.")
+            # logger.info("✅ Проверка завершена.")
 
         except Exception as e:
             logger.error(f"Глобальная ошибка проверки: {e}")

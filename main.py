@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # ИМПОРТИРУЕМ ВСЁ ИЗ ФАЙЛА BOT.PY
-# Это позволяет запустить и сайт, и бота одной командой
 from bot import client, bot, dp, check_updates_task
 
 load_dotenv()
@@ -21,10 +20,8 @@ CAT_LATER = os.getenv("REZKA_CAT_LATER")
 CAT_WATCHED = os.getenv("REZKA_CAT_WATCHED")
 MAX_PAGES = int(os.getenv("REZKA_PAGES", "5"))
 
-# --- LIFESPAN (ЗАПУСК БОТА ВМЕСТЕ С САЙТОМ) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # При старте сервера запускаем бота и проверку обновлений
     polling_task = None
     update_task = None
     
@@ -35,7 +32,6 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # При остановке чистим за собой
     print("🛑 Остановка бота...")
     if polling_task: polling_task.cancel()
     if update_task: update_task.cancel()
@@ -43,7 +39,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# --- МОДЕЛИ ЗАПРОСОВ ---
 class AddRequest(BaseModel):
     post_id: str
     category: str
@@ -55,9 +50,6 @@ class WatchRequest(BaseModel):
 class DeleteRequest(BaseModel):
     post_id: str
     category: str
-
-# --- API РОУТЫ ---
-# Используем объект client, который импортировали из bot.py
 
 @app.get("/api/watching")
 def get_watching():
@@ -104,7 +96,6 @@ def toggle_status(req: WatchRequest):
     success = client.toggle_watch(req.global_id, req.referer)
     return {"success": success}
 
-# --- СТАТИКА ---
 if not os.path.exists("static"):
     os.makedirs("static")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -115,5 +106,4 @@ def serve_webapp():
 
 if __name__ == "__main__":
     import uvicorn
-    # Запускаем сервер
     uvicorn.run(app, host="0.0.0.0", port=8080)
