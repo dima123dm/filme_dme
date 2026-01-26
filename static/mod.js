@@ -76,7 +76,7 @@
         }
 
         // ========================================
-        // Модалка выбора (Lampa.Select)
+        // Модалка выбора
         // ========================================
         function showSelectionModal(results, mediaType, onSelect) {
             if (isModalOpen) {
@@ -140,7 +140,7 @@
         }
 
         // ========================================
-        // Рендер карточек (КАСТОМНАЯ СЕТКА)
+        // Рендер карточек
         // ========================================
         comp.renderItems = function (items) {
             var grid = $('<div class="rezka-grid"></div>');
@@ -157,11 +157,15 @@
                 var yearMatch = rawTitle.match(/\((\d{4})\)/);
                 var year = yearMatch ? yearMatch[1] : '';
                 
+                // ✅ ИСПРАВЛЕНО: Берем ПОЛНОЕ русское название (до слеша)
                 var titleNoYear = rawTitle.replace(/\s*\(\d{4}\)/, '').trim();
-                var titleRu = titleNoYear.split('/')[0].trim();
-                var titleClean = titleRu.split(':')[0].trim();
+                var titleRu = titleNoYear.split('/')[0].trim(); // ← Полное русское название
+                
+                // Для поиска в TMDB - убираем префикс (до двоеточия)
+                var titleForSearch = titleRu.split(':')[0].trim();
 
-                console.log('[Rezka] 📝', rawTitle, '→', titleClean);
+                console.log('[Rezka] 📝 Название:', titleRu);
+                console.log('[Rezka] 🔍 Для поиска:', titleForSearch);
 
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 const mediaType = isTv ? 'tv' : 'movie';
@@ -231,9 +235,9 @@
 
                 card.append(posterDiv);
 
-                // ✅ НАЗВАНИЕ ПОД ПОСТЕРОМ
+                // ✅ НАЗВАНИЕ ПОД ПОСТЕРОМ (ПОЛНОЕ РУССКОЕ)
                 var titleDiv = $('<div class="rezka-title"></div>');
-                titleDiv.text(titleClean);
+                titleDiv.text(titleRu); // ← Полное русское название
                 titleDiv.css({
                     padding: '10px 8px',
                     fontSize: '13px',
@@ -250,19 +254,20 @@
                 card.append(titleDiv);
 
                 // ========================================
-                // КЛИК
+                // КЛИК (используем titleForSearch)
                 // ========================================
                 function handleClick(e) {
                     if (e) e.preventDefault();
                     if (isModalOpen) {
-                        console.log('[Rezka] ⚠️ Модалка уже открыта, игнорируем клик');
+                        console.log('[Rezka] ⚠️ Модалка уже открыта');
                         return;
                     }
                     
-                    console.log('[Rezka] 🎯 Клик:', titleClean);
+                    console.log('[Rezka] 🎯 Клик:', titleRu);
                     Lampa.Loading.start(function() {});
 
-                    searchTMDB(titleClean, year, mediaType, function(results) {
+                    // ← Ищем по очищенному названию
+                    searchTMDB(titleForSearch, year, mediaType, function(results) {
                         Lampa.Loading.stop();
 
                         if (!results.length) {
