@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware # Добавлен импорт CORS
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -70,6 +71,18 @@ async def lifespan(app: FastAPI):
     print("✅ Сервер остановлен.")
 
 app = FastAPI(lifespan=lifespan)
+
+# --- ДОБАВЛЕНО: Настройка CORS ---
+# Это позволяет клиентским скриптам (в браузере) корректно работать с API,
+# даже если будут перекрестные запросы.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Разрешаем все источники
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# ---------------------------------
 
 class AddRequest(BaseModel):
     post_id: str

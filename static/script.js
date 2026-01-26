@@ -1,8 +1,12 @@
+/* */
 const tg = window.Telegram.WebApp;
 tg.expand();
 
-// Текущая выбранная категория (используется для удаления и обновления списка)
 let currentCategory = 'watching';
+// Глобальный объект плеера
+let art = null;
+// Базовый домен для парсинга (если заблокируют, поменяй тут)
+const KINOGO_BASE = "https://kinogo.inc";
 
 // Переключение вкладок
 async function switchTab(cat, btn) {
@@ -14,7 +18,7 @@ async function switchTab(cat, btn) {
     loadGrid(cat);
 }
 
-// Загрузка сетки для выбранной категории
+// Загрузка сетки
 async function loadGrid(cat) {
     const grid = document.getElementById('grid');
     grid.innerHTML = '<div style="grid-column:span 2; text-align:center; padding:30px; color:#666">Загрузка...</div>';
@@ -45,27 +49,28 @@ async function loadGrid(cat) {
     }
 }
 
-// Переменные для деталей
 let currentPostId = null;
-// Храним URL текущей страницы сериала для передачи в toggle
 let currentDetailsUrl = null;
+let currentMovieTitle = ""; // Сохраняем название для поиска
 
-// Открытие модального окна с деталями
+// Открытие деталей
 async function openDetails(url, title, poster) {
     const modal = document.getElementById('details');
     modal.classList.add('open');
     document.getElementById('det-img').src = poster;
     document.getElementById('det-title').innerText = title;
-    document.getElementById('det-controls').style.display = 'none';
+    currentMovieTitle = title; // Запоминаем название
+
+    // Скрываем плеер при открытии нового фильма
+    closePlayer();
     
-    // Очищаем франшизы
+    document.getElementById('det-controls').style.display = 'none';
     const franchiseContainer = document.getElementById('det-franchises');
     if (franchiseContainer) franchiseContainer.innerHTML = '';
 
-    // Сохраняем URL страницы для использования в toggle
     currentDetailsUrl = url;
     const list = document.getElementById('det-list');
-    list.innerHTML = '<div style="text-align:center; padding:40px; color:#888">Загрузка серий...</div>';
+    list.innerHTML = '<div style="text-align:center; padding:40px; color:#888">Загрузка серий (Rezka)...</div>';
     
     try {
         const res = await fetch(`/api/details?url=${encodeURIComponent(url)}`);
@@ -82,21 +87,17 @@ async function openDetails(url, title, poster) {
             list.innerHTML = `<div style="text-align:center; padding:20px;">${data.error}</div>`;
         }
 
-        // --- Рендеринг франшиз (если они пришли) ---
         if (data.franchises && data.franchises.length > 0) {
             if (franchiseContainer) {
                 const fTitle = document.createElement('div');
                 fTitle.className = 'season-title';
                 fTitle.innerText = 'Связанные проекты';
                 franchiseContainer.appendChild(fTitle);
-
                 const fScroll = document.createElement('div');
                 fScroll.className = 'franchise-scroll';
-
                 data.franchises.forEach(f => {
                     const item = document.createElement('div');
                     item.className = 'franchise-card';
-                    // Рекурсивный вызов для перехода по франшизе
                     item.onclick = () => openDetails(f.url, f.title, f.poster);
                     item.innerHTML = `
                         <img src="${f.poster}">
@@ -111,7 +112,6 @@ async function openDetails(url, title, poster) {
             }
         }
 
-        // --- Рендер сезонов и эпизодов ---
         if (data.seasons) {
             Object.keys(data.seasons).forEach(s => {
                 const h = document.createElement('div');
@@ -137,10 +137,131 @@ async function openDetails(url, title, poster) {
 
 // Закрыть модальное окно
 function closeDetails() {
+    closePlayer();
     document.getElementById('details').classList.remove('open');
 }
 
-// Переместить фильм/сериал в другую категорию
+// --- ЛОГИКА ОНЛАЙН ПРОСМОТРА (CLIENT SIDE) ---
+
+function closePlayer() {
+    if (art) {
+        art.destroy();
+        art = null;
+    }
+    document.getElementById('player-container').style.display = 'none';
+    document.getElementById('translation-box').style.display = 'none';
+    document.getElementById('translation-select').innerHTML = '<option value="">Выберите озвучку...</option>';
+}
+
+// Главная функция запуска (вызывается кнопкой "Смотреть")
+async function startOnlineView() {
+    if (!currentMovieTitle) return;
+    
+    const btn = document.querySelector('.btn-play-online');
+    const originalText = btn.innerText;
+    btn.innerText = "🔍 Поиск...";
+    
+    try {
+        // 1. Ищем на Kinogo по названию
+        // Очищаем название от лишнего (например, года)
+        const cleanTitle = currentMovieTitle.split('(')[0].trim();
+        const searchUrl = `${KINOGO_BASE}/index.php?do=search&subaction=search&story=${encodeURIComponent(cleanTitle)}`;
+        
+        const res = await fetch(searchUrl);
+        const text = await res.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(text, 'text/html');
+        
+        // Берем первый результат
+        const firstLink = doc.querySelector('.shortstorytitle a');
+        if (!firstLink) {
+            alert('Не найдено на Kinogo :(');
+            btn.innerText = originalText;
+            return;
+        }
+        
+        const movieUrl = firstLink.href;
+        btn.innerText = "⏳ Загрузка...";
+        
+        // 2. Загружаем страницу фильма
+        await loadKinogoPage(movieUrl);
+        
+    } catch (e) {
+        alert('Ошибка доступа к Kinogo. Убедитесь, что включено расширение CORS!');
+        console.error(e);
+    } finally {
+        btn.innerText = originalText;
+    }
+}
+
+async function loadKinogoPage(url) {
+    try {
+        const res = await fetch(url);
+        const text = await res.text();
+        
+        // Показываем контейнеры
+        document.getElementById('player-container').style.display = 'block';
+        document.getElementById('translation-box').style.display = 'block';
+        
+        // Ищем m3u8
+        const m3u8Match = text.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/);
+        
+        if (m3u8Match && m3u8Match[1]) {
+            let streamUrl = m3u8Match[1];
+            // Запускаем плеер
+            initPlayer(streamUrl);
+        } else {
+            // Если m3u8 не нашли сразу, возможно он в iframe (пока простая логика)
+            alert('Прямая ссылка не найдена. Возможно, нужна более сложная логика парсинга.');
+        }
+        
+        // Попытка найти озвучки (примерная логика, зависит от верстки)
+        // На Kinogo озвучки часто просто вкладками или в JS. 
+        // Здесь мы пока просто оставим плеер, так как парсинг озвучек требует сложного разбора DOM.
+        const select = document.getElementById('translation-select');
+        select.innerHTML = '<option selected>По умолчанию (Kinogo)</option>';
+        
+    } catch (e) {
+        console.error(e);
+        alert('Ошибка загрузки страницы фильма');
+    }
+}
+
+function initPlayer(url) {
+    if (art) art.destroy();
+    
+    art = new Artplayer({
+        container: '#artplayer',
+        url: url,
+        type: 'm3u8',
+        customType: {
+            m3u8: function (video, url) {
+                if (Hls.isSupported()) {
+                    const hls = new Hls();
+                    hls.loadSource(url);
+                    hls.attachMedia(video);
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = url;
+                }
+            },
+        },
+        fullscreen: true,
+        autoplay: true,
+        setting: true,
+        pip: true
+    });
+    
+    // Скролл к плееру
+    document.getElementById('player-container').scrollIntoView({ behavior: 'smooth' });
+}
+
+function changeTranslation(val) {
+    // Заглушка, если реализуешь парсинг озвучек
+    console.log("Смена озвучки:", val);
+}
+
+// --- КОНЕЦ ЛОГИКИ ОНЛАЙН ПРОСМОТРА ---
+
 async function moveMovie(category) {
     if (!currentPostId) return;
     tg.HapticFeedback.notificationOccurred('success');
@@ -151,11 +272,9 @@ async function moveMovie(category) {
     });
     alert('Перенесено!');
     closeDetails();
-    // Перезагружаем текущую вкладку
     switchTab(currentCategory, document.querySelector('.tab-btn.active'));
 }
 
-// Удалить фильм/сериал из текущей категории
 async function deleteMovie() {
     if (!currentPostId) return;
     tg.HapticFeedback.notificationOccurred('success');
@@ -169,7 +288,6 @@ async function deleteMovie() {
     switchTab(currentCategory, document.querySelector('.tab-btn.active'));
 }
 
-// Переключить статус просмотра эпизода
 async function toggle(gid, btn) {
     tg.HapticFeedback.impactOccurred('medium');
     const row = btn.rowElement;
@@ -188,7 +306,6 @@ async function toggle(gid, btn) {
     });
 }
 
-// Открыть поиск
 function openSearch(btn) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
@@ -196,11 +313,10 @@ function openSearch(btn) {
     document.getElementById('search-ui').style.display = 'block';
     const input = document.getElementById('q');
     input.focus();
-    input.value = ''; // Очищаем поле при открытии
+    input.value = ''; 
     document.getElementById('search-results').innerHTML = '';
 }
 
-// Поиск с таймером
 let searchTimer;
 function doSearch(val) {
     clearTimeout(searchTimer);
@@ -230,7 +346,6 @@ function doSearch(val) {
     }, 600);
 }
 
-// Добавить фильм/сериал из поиска
 async function addFav(id, cat) {
     tg.HapticFeedback.notificationOccurred('success');
     await fetch('/api/add', {
@@ -241,5 +356,4 @@ async function addFav(id, cat) {
     alert('Добавлено!');
 }
 
-// Инициализация: подгружаем список «Смотрю»
 loadGrid('watching');
