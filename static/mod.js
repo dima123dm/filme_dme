@@ -6,7 +6,7 @@
 
     function MyRezkaComponent(object) {
         var comp = {};
-        comp.html = $('<div class="items items--vertical"></div>');
+        comp.html = $('<div class="items items--lines"></div>');
         var isModalOpen = false;
 
         comp.create = function () {
@@ -76,7 +76,7 @@
         }
 
         // ========================================
-        // Модалка выбора
+        // Модалка выбора (Lampa.Select)
         // ========================================
         function showSelectionModal(results, mediaType, onSelect) {
             if (isModalOpen) {
@@ -94,7 +94,7 @@
                 var poster = item.poster_path 
                     ? 'https://image.tmdb.org/t/p/w200' + item.poster_path 
                     : '';
-                var overview = (item.overview || 'Нет описания').substring(0, 120);
+                var overview = (item.overview || 'Нет описания').substring(0, 150);
                 
                 items.push({
                     title: title + ' (' + year + ')',
@@ -140,10 +140,17 @@
         }
 
         // ========================================
-        // Рендер карточек
+        // Рендер карточек (КАСТОМНАЯ СЕТКА)
         // ========================================
         comp.renderItems = function (items) {
-            var body = $('<div class="items-line"></div>');
+            var grid = $('<div class="rezka-grid"></div>');
+            grid.css({
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                gap: '20px',
+                padding: '20px',
+                width: '100%'
+            });
 
             items.forEach(function (item) {
                 var rawTitle = item.title || '';
@@ -164,39 +171,93 @@
                     posterUrl = MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster);
                 }
 
-                // Используем стандартный шаблон Lampa
-                var cardData = {
-                    title: titleClean,
-                    original_title: rawTitle,
-                    release_year: year,
-                    img: posterUrl
-                };
+                // ✅ КАРТОЧКА
+                var card = $('<div class="rezka-card selector"></div>');
+                card.css({
+                    position: 'relative',
+                    cursor: 'pointer',
+                    borderRadius: '10px',
+                    overflow: 'hidden',
+                    transition: 'transform 0.2s, box-shadow 0.2s',
+                    backgroundColor: '#1a1a1a'
+                });
 
-                var card = Lampa.Template.get('card', cardData);
-                card.addClass('card--collection');
+                card.hover(
+                    function() { 
+                        $(this).css({
+                            'transform': 'scale(1.05)',
+                            'box-shadow': '0 8px 20px rgba(0,0,0,0.5)'
+                        }); 
+                    },
+                    function() { 
+                        $(this).css({
+                            'transform': 'scale(1)',
+                            'box-shadow': 'none'
+                        }); 
+                    }
+                );
 
-                // Добавляем статус
+                // ✅ ПОСТЕР
+                var posterDiv = $('<div class="rezka-poster"></div>');
+                posterDiv.css({
+                    width: '100%',
+                    paddingBottom: '150%',
+                    position: 'relative',
+                    backgroundImage: posterUrl ? 'url(' + posterUrl + ')' : 'none',
+                    backgroundColor: '#2a2a2a',
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center'
+                });
+
+                // ✅ СТАТУС ВНИЗУ ПОСТЕРА
                 if (item.status) {
-                    var statusBadge = $('<div class="card__quality"></div>')
-                        .text(item.status)
-                        .css({
-                            position: 'absolute',
-                            bottom: '0',
-                            left: '0',
-                            right: '0',
-                            padding: '4px',
-                            background: 'rgba(0,0,0,0.8)',
-                            fontSize: '11px',
-                            textAlign: 'center',
-                            borderRadius: '0 0 8px 8px'
-                        });
-                    card.find('.card__view').append(statusBadge);
+                    var statusBadge = $('<div class="rezka-status"></div>');
+                    statusBadge.text(item.status);
+                    statusBadge.css({
+                        position: 'absolute',
+                        bottom: '0',
+                        left: '0',
+                        right: '0',
+                        padding: '5px 8px',
+                        background: 'linear-gradient(to top, rgba(0,0,0,0.95), rgba(0,0,0,0.7))',
+                        color: '#fff',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        textAlign: 'center',
+                        zIndex: '2'
+                    });
+                    posterDiv.append(statusBadge);
                 }
 
-                // Обработчик клика
+                card.append(posterDiv);
+
+                // ✅ НАЗВАНИЕ ПОД ПОСТЕРОМ
+                var titleDiv = $('<div class="rezka-title"></div>');
+                titleDiv.text(titleClean);
+                titleDiv.css({
+                    padding: '10px 8px',
+                    fontSize: '13px',
+                    lineHeight: '1.3',
+                    color: '#fff',
+                    textAlign: 'center',
+                    minHeight: '50px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden'
+                });
+
+                card.append(titleDiv);
+
+                // ========================================
+                // КЛИК
+                // ========================================
                 function handleClick(e) {
                     if (e) e.preventDefault();
-                    if (isModalOpen) return; // Блокируем повторные клики
+                    if (isModalOpen) {
+                        console.log('[Rezka] ⚠️ Модалка уже открыта, игнорируем клик');
+                        return;
+                    }
                     
                     console.log('[Rezka] 🎯 Клик:', titleClean);
                     Lampa.Loading.start(function() {});
@@ -235,10 +296,10 @@
                 card.on('hover:enter', handleClick);
                 card.on('click', handleClick);
 
-                body.append(card);
+                grid.append(card);
             });
 
-            comp.html.append(body);
+            comp.html.append(grid);
         };
 
         return comp;
