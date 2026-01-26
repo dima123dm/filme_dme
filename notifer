@@ -1,0 +1,112 @@
+"""
+Модуль для оповещения о выходе новых серий через Telegram.
+
+Содержит функцию `check_for_updates`, которая принимает экземпляр
+RezkaClient и список сериалов, проверяет наличие новых эпизодов и
+отправляет сообщение в Telegram при обнаружении.
+"""
+
+import os
+from typing import List, Dict, Tuple, Optional
+
+import requests
+
+from rezka_client import RezkaClient
+
+
+def _resolve_chat_id(bot_token: str) -> Optional[str]:
+    """
+    Пытается автоматически определить chat_id пользователя для бота.
+    Для этого запрашивает `getUpdates` и берёт идентификатор чата из
+    последнего сообщения. Если обновлений нет, просит пользователя
+    отправить боту любое сообщение. Возвращает chat_id или None.
+    """
+    try:
+        resp = requests.get(
+            f"https://api.telegram.org/bot{bot_token}/getUpdates",
+            params={"limit": 1, "offset": -1},
+            timeout=5,
+        )
+        data = resp.json()
+        if not data.get("ok"):
+            return None
+        result = data.get("result", [])
+        if not result:
+            print("ℹ️ Бот не получил ни одного сообщения. Отправьте любое сообщение боту, чтобы получить chat_id.")
+            return None
+        message = result[-1].get("message") or result[-1].get("edited_message")
+        if message and message.get("chat"):
+            chat_id = message["chat"].get("id")
+            return str(chat_id)
+    except Exception:
+        pass
+    return None
+
+
+def check_for_updates(
+    client: RezkaClient,
+    watchlist: List[Dict[str, any]],
+    translator_id: Optional[str] = None,
+) -> None:
+    """
+    Проверяет сериалы в списке watchlist на наличие новых эпизодов и
+    отправляет уведомления через Telegram. Каждая запись в `watchlist`
+    должна содержать ключи: `url`, `title` и `last_episode` (кортеж
+    (season, episode)). При обнаружении серии с номером больше чем
+    `last_episode` у соответствующего сериала, пользователю приходит
+    уведомление.
+
+    Для отправки сообщений необходим токен бота (переменная окружения
+    TELEGRAM_BOT_TOKEN). Если переменная TELEGRAM_CHAT_ID не задана,
+    функция попытается определить chat_id автоматически, используя
+    метод `getUpdates` Telegram API. Для этого сначала отправьте
+    любое сообщение вашему боту.
+    """
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        print("⚠️ TELEGRAM_BOT_TOKEN не задан; оповещения отключены")
+        return
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        chat_id = _resolve_chat_id(bot_token) or None
+        if not chat_id:
+            # нельзя отправлять без chat_id
+            print("⚠️ Не удалось определить chat_id; оповещения отключены")
+            return
+    for item in watchlist:
+        try:
+            url = item.get("url")
+            title = item.get("title")
+            last_episode: Optional[Tuple[int, int]] = item.get("last_episode")  # type: ignore
+            if not url:
+                continue
+            details = client.get_series_details(url)
+            if not details or "seasons" not in details:
+                continue
+            seasons = details["seasons"]
+            max_season = -1
+            max_episode = -1
+            for s_id, eps in seasons.items():
+                if not eps:
+                    continue
+                s_num = int(s_id) if str(s_id).isdigit() else 0
+                e_num = int(eps[-1]["episode"]) if eps[-1]["episode"].isdigit() else 0
+                if s_num > max_season or (s_num == max_season and e_num > max_episode):
+                    max_season = s_num
+                    max_episode = e_num
+            if last_episode:
+                last_s, last_e = last_episode
+                if max_season < last_s or (max_season == last_s and max_episode <= last_e):
+                    continue
+            msg = f"📺 Вышла новая серия: {title} — сезон {max_season}, серия {max_episode}"
+            try:
+                requests.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    data={"chat_id": chat_id, "text": msg},
+                    timeout=5,
+                )
+                print(f"🔔 Оповещение отправлено: {msg}")
+            except Exception:
+                print("❌ Не удалось отправить уведомление в Telegram")
+        except Exception:
+            continue

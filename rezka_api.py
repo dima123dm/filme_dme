@@ -1,8 +1,9 @@
 import os
 import re
 import time
-import json
-from curl_cffi import requests as curl_requests
+from typing import Dict, List, Optional, Any
+
+from curl_cffi import requests as curl_requests  # type: ignore
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
@@ -11,33 +12,25 @@ load_dotenv()
 
 class RezkaClient:
     """
-    Класс-клиент для работы с сайтом Rezka (HDRezka).
-
-    В оригинальной реализации существовал дефект, из‑за которого
-    метод _parse_schedule_table анализировал только первую таблицу
-    расписания (class="b-post__schedule_table") на странице сериала.
-    На HDRezka же график выхода серий может состоять из нескольких
-    таблиц: отдельно для текущего сезона и скрытых блоков для
-    предыдущих. Из‑за этого статус «просмотрено» корректно
-    определялся только для последних серий, а для эпизодов
-    предыдущих сезонов считался неопределённым. В этой версии
-    исправлена логика: разбираются все таблицы расписания, а для
-    каждой строки корректно извлекаются сезон и номер серии.
+    Клиент для работы с HDRezka. Содержит методы для авторизации,
+    получения информации о сериалах, работе с закладками, франшизами
+    и изменением статуса эпизодов.
     """
 
     def __init__(self):
+        # Инициализируем curl session с маскировкой Chrome
         self.session = curl_requests.Session(impersonate="chrome110")
         self.login = os.getenv("REZKA_LOGIN")
         self.password = os.getenv("REZKA_PASS")
         self.is_logged_in = False
+        # Основной домен для запросов
         self.origin = "https://hdrezka.me"
 
-    def auth(self):
-        """Аутентификация на сайте."""
+    def auth(self) -> bool:
+        """Авторизация на HDRezka. Возвращает True при успехе."""
         if self.is_logged_in:
             return True
         try:
-            print(" Auth...")
             headers = {"X-Requested-With": "XMLHttpRequest"}
             r = self.session.post(
                 f"{self.origin}/ajax/login/",
@@ -46,21 +39,23 @@ class RezkaClient:
             )
             if r.json().get("success"):
                 self.is_logged_in = True
-                print("✅ Auth Success")
                 return True
         except Exception:
             pass
         return False
 
-    def _is_watched_check(self, element):
-        """Проверка статуса просмотра для HTML‑элемента серии."""
+    # ------------------------
+    # Внутренние методы парсинга
+    # ------------------------
+    def _is_watched_check(self, element: Any) -> bool:
+        """Определяет, отмечен ли элемент как просмотренный."""
         if not element:
             return False
         classes = element.get("class", [])
-        # Некоторые строки таблицы помечаются классами watched / b-watched
+        # Класс watched / b-watched в строке
         if "watched" in classes or "b-watched" in classes:
             return True
-        # Также иконка может иметь класс watched
+        # Или класс watched на иконке
         action = element.find(
             attrs={"class": lambda x: x and ("watch-episode-action" in x or "b-ico" in x)}
         )
@@ -69,18 +64,13 @@ class RezkaClient:
                 return True
         return False
 
-    def _parse_schedule_table(self, soup: BeautifulSoup) -> dict:
+    def _parse_schedule_table(self, soup: BeautifulSoup) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Парсинг всех таблиц расписания на странице. Возвращает словарь
-        сезонов со списками эпизодов, где каждому эпизоду назначается
-        статус просмотра и глобальный идентификатор.
-
-        Ранее разбиралась только одна таблица, что приводило к
-        пропуску серий из скрытых блоков расписания. Теперь
-        обходим все таблицы class="b-post__schedule_table".
+        Парсит все таблицы расписания на странице сериала. Возвращает
+        словарь сезонов со списками эпизодов, каждый содержит
+        идентификатор, номер серии и флаг просмотра.
         """
-        seasons: dict[str, list] = {}
-        # На странице может быть несколько таблиц: для текущего сезона и скрытые для предыдущих
+        seasons: Dict[str, List[Dict[str, Any]]] = {}
         tables = soup.find_all("table", class_="b-post__schedule_table")
         for table in tables:
             for tr in table.find_all("tr"):
@@ -88,20 +78,18 @@ class RezkaClient:
                 if not td_1:
                     continue
                 text = td_1.get_text(strip=True)
-                # Инициализируем сезон и эпизод по умолчанию
+                # По умолчанию
                 s_id = "1"
                 e_id = "1"
-                # Пытаемся извлечь сезон и серию из текста, например: '2 сезон 5 серия'
+                # Извлекаем "2 сезон 5 серия" или просто "15 серия"
                 match = re.search(r"(\d+)\s*сезон\s*(\d+)\s*серия", text, re.IGNORECASE)
                 if match:
-                    s_id = match.group(1)
-                    e_id = match.group(2)
+                    s_id, e_id = match.group(1), match.group(2)
                 else:
-                    # Иногда указано только '15 серия'
                     match_ep = re.search(r"(\d+)\s*серия", text, re.IGNORECASE)
                     if match_ep:
                         e_id = match_ep.group(1)
-                # Нормализуем, убирая ведущие нули
+                # Нормализация
                 try:
                     s_id = str(int(s_id))
                 except Exception:
@@ -110,29 +98,24 @@ class RezkaClient:
                     e_id = str(int(e_id))
                 except Exception:
                     pass
-                # Получаем глобальный идентификатор. Он может быть и в td, и в иконке
+                # Определяем глобальный id
                 global_id = td_1.get("data-id")
                 action_icon = tr.find(
                     attrs={"class": lambda x: x and "watch-episode-action" in x}
                 )
                 if action_icon and action_icon.get("data-id"):
                     global_id = action_icon.get("data-id")
-                # Определяем, доступен ли эпизод: если в строке нет иконки
-                # watch-episode-action и нет отметки exists-episode, значит
-                # серия ещё не вышла. Такие записи не добавляем в список.
+                # Доступность: если нет action и нет exists-episode, пропускаем
                 has_action = bool(action_icon)
                 has_exists = bool(tr.find("span", class_="exists-episode"))
                 if not has_action and not has_exists:
-                    # ещё не выпущенная серия
                     continue
-                # Пропускаем, если id не найден
                 if not global_id:
                     continue
                 is_watched = self._is_watched_check(tr)
-                # Инициализируем список сезонов
                 if s_id not in seasons:
                     seasons[s_id] = []
-                # Проверяем существование эпизода, чтобы не создавать дубликаты
+                # избегаем дублей
                 exists = any(ep["episode"] == e_id for ep in seasons[s_id])
                 if not exists:
                     seasons[s_id].append(
@@ -145,26 +128,22 @@ class RezkaClient:
                     )
         return seasons
 
-    def _parse_html_list(self, html_content: str) -> dict:
+    def _parse_html_list(self, html_content: str) -> Dict[str, Dict[str, Any]]:
         """
-        Парсинг плоского списка серий из API cdn_series. Метод собирает
-        уникальные эпизоды (ключ "s_id:e_id") и присваивает статус
-        просмотра, если в списке есть соответствующие классы.
+        Парсит список эпизодов из HTML, возвращая уникальные эпизоды.
         """
         soup = BeautifulSoup(html_content, "html.parser")
-        unique_episodes: dict[str, dict] = {}
-        # Ищем контейнеры списков эпизодов
+        unique_episodes: Dict[str, Dict[str, Any]] = {}
+        # Ищем UL контейнеры эпизодов
         containers = soup.find_all(
             "ul",
-            class_=lambda x: x
-            and ("simple_episodes__list" in x or "b-simple_episodes__list" in x),
+            class_=lambda x: x and ("simple_episodes__list" in x or "b-simple_episodes__list" in x),
         )
         if not containers:
             containers = soup.find_all("ul", id=re.compile(r"simple-episodes-list"))
         if not containers:
             containers = [soup]
         for cont in containers:
-            # Определяем сезон по id контейнера, например simple-episodes-list-2
             container_s_id = None
             if hasattr(cont, "get") and cont.get("id"):
                 match_s = re.search(r"list-(\d+)", cont.get("id"))
@@ -173,9 +152,7 @@ class RezkaClient:
             li_items = cont.find_all("li", class_="b-simple_episode__item")
             for item in li_items:
                 try:
-                    # id сезона
                     s_id = item.get("data-season_id") or container_s_id or "1"
-                    # id серии
                     e_id = item.get("data-episode_id")
                     if not e_id:
                         continue
@@ -199,30 +176,23 @@ class RezkaClient:
                     }
                 except Exception:
                     continue
-        print(f"   Найдено {len(unique_episodes)} уникальных серий")
         return unique_episodes
 
-    def get_series_details(self, url: str) -> dict:
+    # ------------------------
+    # Получение информации о сериалах
+    # ------------------------
+    def get_series_details(self, url: str) -> Dict[str, Any]:
         """
-        Возвращает подробную информацию о сериале: постер и список сезонов с эпизодами.
-
-        Для каждого эпизода определяется статус просмотра на основе расписания
-        (приоритетнее) и данных API cdn_series. Структура результата:
-
-        {
-            "seasons": {"1": [...], "2": [...]},
-            "poster": "...url...",
-            "post_id": "..."
-        }
+        Загружает страницу сериала, возвращает информацию о сезонах и эпизодах.
+        Статус просмотра определяется по таблице расписания и данным API.
         """
         if not self.auth():
             return {"error": "Auth failed"}
         try:
-            print(f"\n {url}")
             r = self.session.get(url)
             html_text = r.text
             soup = BeautifulSoup(html_text, "html.parser")
-            # Получаем постер в высоком разрешении
+            # Постер
             hq_poster = ""
             side = soup.find(class_="b-sidecover")
             if side:
@@ -230,18 +200,18 @@ class RezkaClient:
                     hq_poster = side.find("a").get("href")
                 elif side.find("img"):
                     hq_poster = side.find("img").get("src")
-            # Определяем post_id
-            post_id = None
+            # post_id
+            post_id: Optional[str] = None
             match_pid = re.search(r'["\']post_id["\']\s*:\s*(\d+)', html_text)
             if match_pid:
                 post_id = match_pid.group(1)
             elif soup.find(id="post_id"):
                 post_id = soup.find(id="post_id").get("value")
-            # Парсим расписание (таблица)
+            # Таблица расписания
             table_seasons = self._parse_schedule_table(soup)
-            all_unique_episodes: dict[str, dict] = {}
+            all_unique_episodes: Dict[str, Dict[str, Any]] = {}
             if post_id:
-                translator_id = None
+                translator_id: Optional[str] = None
                 match_tid = re.search(r'["\']translator_id["\']\s*:\s*(\d+)', html_text)
                 if match_tid:
                     translator_id = match_tid.group(1)
@@ -249,15 +219,13 @@ class RezkaClient:
                     active = soup.find(class_="b-translator__item active")
                     if active:
                         translator_id = active.get("data-translator_id")
-                # Список id сезонов, которые можно запросить через ajax/get_cdn_series
+                # ID сезонов
                 season_ids = re.findall(r'data-tab_id=["\'](\d+)["\']', html_text)
                 season_ids = sorted(
                     list(set(season_ids)), key=lambda x: int(x) if x.isdigit() else 0
                 )
-                # Фильтруем только разумные id
                 season_ids = [s for s in season_ids if s.isdigit() and int(s) < 200]
                 if season_ids:
-                    print(f" Сезоны: {season_ids}")
                     for season_id in season_ids:
                         payload = {
                             "id": post_id,
@@ -278,7 +246,6 @@ class RezkaClient:
                         except Exception:
                             continue
                 else:
-                    print(" Качаю всё сразу...")
                     payload = {
                         "id": post_id,
                         "translator_id": translator_id or "238",
@@ -295,25 +262,22 @@ class RezkaClient:
                             all_unique_episodes.update(new_eps)
                     except Exception:
                         pass
-            # Фолбек: если ajax ответ пуст, парсим с html страницы
+            # fallback
             if not all_unique_episodes:
-                print("⚠️ API пуст, беру страницу...")
                 new_eps = self._parse_html_list(html_text)
                 all_unique_episodes.update(new_eps)
-            # Объединяем cdn-эпизоды со статусами из таблицы
-            final_seasons_dict: dict[str, list] = {}
-            # Сначала из cdn (player)
+            # Объединяем таблицу и список
+            final_seasons_dict: Dict[str, List[Dict[str, Any]]] = {}
+            # Сначала из player
             for _, ep_data in all_unique_episodes.items():
                 s_id = ep_data["s_id"]
                 if s_id not in final_seasons_dict:
                     final_seasons_dict[s_id] = []
                 clean_ep = ep_data.copy()
-                # удаляем служебное поле s_id, он не нужен в конечном ответе
                 del clean_ep["s_id"]
                 final_seasons_dict[s_id].append(clean_ep)
-            # Затем обновляем статусами из расписания: таблица имеет приоритет
+            # Обновляем статусами из таблицы
             if table_seasons:
-                print(" Объединение с таблицей...")
                 for s_id, t_eps in table_seasons.items():
                     if s_id not in final_seasons_dict:
                         final_seasons_dict[s_id] = list(t_eps)
@@ -330,8 +294,8 @@ class RezkaClient:
                                 break
                         if not found:
                             final_seasons_dict[s_id].append(t_ep)
-            # Сортируем сезоны и серии внутри
-            sorted_seasons: dict[str, list] = {}
+            # Сортируем
+            sorted_seasons: Dict[str, List[Dict[str, Any]]] = {}
             sorted_keys = sorted(
                 final_seasons_dict.keys(), key=lambda x: int(x) if x.isdigit() else 999
             )
@@ -345,14 +309,21 @@ class RezkaClient:
         except Exception as e:
             return {"error": str(e)}
 
-    # Методы для категорий, поиска и добавления/переключения статуса
-    def get_category_items(self, cat_id: str) -> list:
+    # ------------------------
+    # Работа с закладками
+    # ------------------------
+    def get_category_items(self, cat_id: str) -> List[Dict[str, Any]]:
+        """
+        Возвращает список элементов из одной страницы закладок категории `cat_id`.
+        Если необходимо собрать несколько страниц, используйте
+        `get_category_items_paginated`.
+        """
         if not self.auth():
             return []
         try:
             r = self.session.get(f"{self.origin}/favorites/{cat_id}/")
             soup = BeautifulSoup(r.text, "html.parser")
-            items = []
+            items: List[Dict[str, Any]] = []
             for item in soup.find_all(class_="b-content__inline_item"):
                 try:
                     link = item.find(class_="b-content__inline_item-link").find("a")
@@ -373,30 +344,8 @@ class RezkaClient:
         except Exception:
             return []
 
-    def search(self, query: str) -> list:
-        if not self.auth():
-            return []
-        try:
-            r = self.session.post(
-                f"{self.origin}/engine/ajax/search.php", data={"q": query}
-            )
-            soup = BeautifulSoup(r.content, "html.parser")
-            results = []
-            for item in soup.select(".b-search__section_list li"):
-                try:
-                    link = item.find("a")
-                    title = item.find("span", class_="enty").get_text().strip()
-                    url = link.attrs["href"]
-                    match = re.search(r"/(\d+)-", url)
-                    if match:
-                        results.append({"id": match.group(1), "title": title, "url": url})
-                except Exception:
-                    continue
-            return results
-        except Exception:
-            return []
-
     def add_favorite(self, post_id: str, cat_id: str) -> bool:
+        """Добавляет фильм/сериал в закладки."""
         if not self.auth():
             return False
         try:
@@ -404,20 +353,140 @@ class RezkaClient:
                 f"{self.origin}/ajax/favorites/",
                 data={"post_id": post_id, "cat_id": cat_id, "action": "add_post"},
             )
-            return r.json().get("success", False)
+            return bool(r.json().get("success", False))
         except Exception:
             return False
 
-    def toggle_watch(self, global_id: str) -> bool:
+    def remove_favorite(self, post_id: str, cat_id: str) -> bool:
+        """Удаляет фильм/сериал из закладок категории."""
         if not self.auth():
             return False
         try:
             r = self.session.post(
-                f"{self.origin}/engine/ajax/schedule_watched.php", data={"id": global_id}
+                f"{self.origin}/ajax/favorites/",
+                data={"post_id": post_id, "cat_id": cat_id, "action": "del_post"},
             )
-            return r.status_code == 200
+            try:
+                return bool(r.json().get("success", False))
+            except Exception:
+                return False
         except Exception:
             return False
 
+    def get_category_items_paginated(self, cat_id: str, max_pages: int = 5) -> List[Dict[str, Any]]:
+        """
+        Собирает элементы из нескольких страниц закладок. Использует
+        `/favorites/<cat_id>/page/<n>/` для обхода страниц.
+        """
+        all_items: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        if not self.auth():
+            return []
+        for page in range(1, max_pages + 1):
+            try:
+                url = f"{self.origin}/favorites/{cat_id}/"
+                if page > 1:
+                    url = f"{url}page/{page}/"
+                r = self.session.get(url)
+                soup = BeautifulSoup(r.text, "html.parser")
+                items_page: List[Dict[str, Any]] = []
+                for item in soup.find_all(class_="b-content__inline_item"):
+                    try:
+                        item_id = item.get("data-id")
+                        if not item_id or item_id in seen_ids:
+                            continue
+                        link = item.find(class_="b-content__inline_item-link").find("a")
+                        img = item.find(class_="b-content__inline_item-cover").find("img")
+                        status = item.find(class_="info")
+                        items_page.append(
+                            {
+                                "id": item_id,
+                                "title": link.get_text(strip=True) if link else "",
+                                "url": link.get("href") if link else "",
+                                "poster": img.get("src") if img else "",
+                                "status": status.get_text(strip=True) if status else "",
+                            }
+                        )
+                        seen_ids.add(item_id)
+                    except Exception:
+                        continue
+                if not items_page:
+                    break
+                all_items.extend(items_page)
+            except Exception:
+                break
+        return all_items
 
-client = RezkaClient()
+    # ------------------------
+    # Работа с эпизодами
+    # ------------------------
+    def toggle_watch(self, global_id: str) -> bool:
+        """
+        Переключает статус просмотра для указанного эпизода.
+
+        Добавлены заголовки и проверка JSON, чтобы убедиться, что
+        сервер принял запрос.
+        """
+        if not self.auth():
+            return False
+        try:
+            headers = {"X-Requested-With": "XMLHttpRequest"}
+            r = self.session.post(
+                f"{self.origin}/engine/ajax/schedule_watched.php",
+                data={"id": global_id},
+                headers=headers,
+            )
+            try:
+                data = r.json()
+                return bool(data.get("success", False) or data.get("status") == "ok")
+            except Exception:
+                return r.status_code == 200
+        except Exception:
+            return False
+
+    # ------------------------
+    # Работа с франшизами
+    # ------------------------
+    def get_franchise_items(self, franchise_url: str) -> List[Dict[str, Any]]:
+        """
+        Возвращает список фильмов/сериалов на странице франшизы.
+        """
+        items: List[Dict[str, Any]] = []
+        if not franchise_url:
+            return items
+        try:
+            r = self.session.get(franchise_url)
+            soup = BeautifulSoup(r.text, "html.parser")
+            for block in soup.find_all(class_="b-content__inline_item"):
+                try:
+                    link = block.find(class_="b-content__inline_item-link").find("a")
+                    title = link.get_text(strip=True)
+                    url = link.get("href")
+                    item_id = block.get("data-id")
+                    poster = ""
+                    img = block.find(class_="b-content__inline_item-cover").find("img")
+                    if img:
+                        poster = img.get("src")
+                    year = None
+                    info = block.find(class_="info")
+                    if info:
+                        year_match = re.search(r"\d{4}", info.get_text())
+                        if year_match:
+                            year = year_match.group(0)
+                    items.append(
+                        {
+                            "id": item_id,
+                            "title": title,
+                            "url": url,
+                            "poster": poster,
+                            "year": year,
+                        }
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return items
+
+
+__all__ = ["RezkaClient"]
