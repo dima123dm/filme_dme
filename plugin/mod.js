@@ -11,11 +11,13 @@
     // ========================================
     function RezkaCategory(category) {
         var comp = {};
-        var html = $('<div class="category-full"></div>');
+        comp.html = $('<div class="rezka-category"></div>');
         var scroll = null;
+        var cards = [];
         var items_data = [];
         var isModalOpen = false;
         var last_item = null;
+        var focused_card = null;
         
         var endpoints = {
             'watching': '/api/watching',
@@ -27,7 +29,7 @@
             console.log('[Rezka] Creating category:', category);
             
             var loader = $('<div class="broadcast__text">Загрузка...</div>');
-            html.append(loader);
+            comp.html.append(loader);
             
             $.ajax({
                 url: MY_API_URL + endpoints[category],
@@ -40,44 +42,56 @@
                     
                     if (items && items.length > 0) {
                         console.log('[Rezka] Loaded:', items.length, 'items');
-                        comp.build(items);
-                        comp.start();
+                        comp.renderItems(items);
                     } else {
-                        html.append('<div class="broadcast__text">Список пуст</div>');
-                        Lampa.Controller.enable('content');
+                        comp.html.append('<div class="broadcast__text">Список пуст</div>');
                     }
+                    
+                    Lampa.Controller.enable('content');
                 },
                 error: function(err) {
                     console.error('[Rezka] Error:', err);
                     loader.remove();
-                    html.append('<div class="broadcast__text">Ошибка загрузки</div>');
+                    comp.html.append('<div class="broadcast__text">Ошибка загрузки</div>');
                 }
             });
             
-            return html;
+            return comp.html;
         };
         
-        comp.build = function(items) {
-            console.log('[Rezka] Building', items.length, 'cards');
+        comp.renderItems = function(items) {
+            console.log('[Rezka] Rendering', items.length, 'cards');
             
-            // Используем Lampa.Scroll
+            // Создаем scroll для вертикальной прокрутки
             scroll = new Lampa.Scroll({
                 horizontal: false,
-                step: 250
+                vertical: true
             });
             
-            var content = $('<div class="category-full__cards"></div>');
-            
-            items.forEach(function(item) {
-                var card = comp.card(item);
-                content.append(card);
+            // Grid с ТВОИМ красивым стилем
+            var grid = $('<div class="rezka-grid"></div>');
+            grid.css({
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                gap: '20px',
+                padding: '20px',
+                width: '100%',
+                boxSizing: 'border-box'
             });
             
-            scroll.append(content);
-            html.append(scroll.render());
+            items.forEach(function(item, index) {
+                var card = comp.createCard(item, index);
+                cards.push(card);
+                grid.append(card);
+            });
+            
+            scroll.append(grid);
+            comp.html.append(scroll.render());
+            
+            comp.start();
         };
         
-        comp.card = function(item) {
+        comp.createCard = function(item, index) {
             var rawTitle = item.title || '';
             var yearMatch = rawTitle.match(/\((\d{4})\)/);
             var year = yearMatch ? yearMatch[1] : '';
@@ -91,59 +105,118 @@
             var mediaType = isTv ? 'tv' : 'movie';
             var posterUrl = item.poster ? MY_API_URL + '/api/img?url=' + encodeURIComponent(item.poster) : '';
             
-            // Используем стандартный шаблон карточки Lampa
-            var card = Lampa.Template.get('card', {
-                title: titleRu,
-                release_year: year
+            // Карточка с ТВОИМ красивым стилем
+            var card = $('<div class="rezka-card selector"></div>');
+            card.attr('data-index', index);
+            card.css({
+                position: 'relative',
+                cursor: 'pointer',
+                borderRadius: '10px',
+                overflow: 'hidden',
+                transition: 'transform 0.2s, box-shadow 0.2s',
+                backgroundColor: '#1a1a1a'
             });
             
-            // Устанавливаем постер
-            var img = card.find('.card__img')[0];
-            if (img && posterUrl) {
-                img.onload = function() {
-                    card.addClass('card--loaded');
-                };
-                img.onerror = function() {
-                    card.addClass('card--loaded');
-                };
-                img.src = posterUrl;
-            }
+            // Постер
+            var posterDiv = $('<div class="rezka-poster"></div>');
+            posterDiv.css({
+                width: '100%',
+                paddingBottom: '150%',
+                position: 'relative',
+                backgroundImage: posterUrl ? 'url(' + posterUrl + ')' : 'none',
+                backgroundColor: '#2a2a2a',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center'
+            });
             
             // Статус
             if (item.status) {
-                var info = card.find('.card__view');
-                if (info.length) {
-                    info.append('<div class="card__quality">' + item.status + '</div>');
-                }
+                var statusBadge = $('<div></div>');
+                statusBadge.text(item.status);
+                statusBadge.css({
+                    position: 'absolute',
+                    bottom: '0',
+                    left: '0',
+                    right: '0',
+                    padding: '5px 8px',
+                    background: 'linear-gradient(to top, rgba(0,0,0,0.95), rgba(0,0,0,0.7))',
+                    color: '#fff',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    textAlign: 'center',
+                    zIndex: '2'
+                });
+                posterDiv.append(statusBadge);
             }
             
-            // Сохраняем данные в карточке
+            card.append(posterDiv);
+            
+            // Название
+            var titleDiv = $('<div></div>');
+            titleDiv.text(titleRu);
+            titleDiv.css({
+                padding: '10px 8px',
+                fontSize: '13px',
+                lineHeight: '1.3',
+                color: '#fff',
+                textAlign: 'center',
+                minHeight: '50px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden'
+            });
+            
+            card.append(titleDiv);
+            
+            // Сохраняем данные
             card.data('item', item);
             card.data('title_ru', titleRuClean);
             card.data('title_en', titleEn);
             card.data('year', year);
             card.data('media_type', mediaType);
             
-            // Обычный клик - открыть фильм
-            card.on('hover:enter', function() {
-                console.log('[Rezka] Opening:', titleRu);
-                comp.open(titleRuClean, titleEn, year, mediaType);
-            });
-            
-            // Focus/Blur для подсветки
+            // Hover эффекты
             card.on('hover:focus', function() {
+                // Убираем подсветку со всех
+                $('.rezka-card').css({
+                    'transform': 'scale(1)',
+                    'box-shadow': 'none',
+                    'z-index': '1'
+                });
+                
+                // Подсвечиваем текущую
+                card.css({
+                    'transform': 'scale(1.05)',
+                    'box-shadow': '0 8px 20px rgba(255,255,255,0.3)',
+                    'z-index': '10'
+                });
+                
                 last_item = item;
-                card.addClass('focus');
+                focused_card = card;
             });
             
             card.on('hover:blur', function() {
-                card.removeClass('focus');
+                card.css({
+                    'transform': 'scale(1)',
+                    'box-shadow': 'none',
+                    'z-index': '1'
+                });
+            });
+            
+            // Клик - открыть фильм
+            card.on('hover:enter', function(e) {
+                if (e) e.preventDefault();
+                if (isModalOpen) return;
+                
+                console.log('[Rezka] Opening:', titleRu);
+                comp.openCard(titleRuClean, titleEn, year, mediaType);
             });
             
             return card;
         };
         
-        comp.open = function(titleRu, titleEn, year, mediaType) {
+        comp.openCard = function(titleRu, titleEn, year, mediaType) {
             Lampa.Loading.start(function() {});
             
             var searchUrl = 'https://api.themoviedb.org/3/search/' + mediaType + 
@@ -410,16 +483,17 @@
         comp.start = function() {
             console.log('[Rezka] Start');
             
-            var _this = this;
-            
             Lampa.Controller.add('content', {
                 toggle: function() {
-                    Lampa.Controller.collectionSet(html);
-                    Lampa.Controller.collectionFocus(false, html);
+                    Lampa.Controller.collectionSet(comp.html);
+                    if (cards.length > 0) {
+                        Lampa.Controller.collectionFocus(cards[0], comp.html);
+                    }
                 },
                 up: function() {
                     if (Navigator.canmove('up')) {
                         Navigator.move('up');
+                        if (scroll) scroll.minus(250);
                     } else {
                         Lampa.Controller.toggle('head');
                     }
@@ -427,6 +501,7 @@
                 down: function() {
                     if (Navigator.canmove('down')) {
                         Navigator.move('down');
+                        if (scroll) scroll.plus(250);
                     }
                 },
                 left: function() {
@@ -444,23 +519,20 @@
                 }
             });
             
-            // ВАЖНО: Добавляем обработчик кнопки Options/Menu
-            Lampa.Controller.listener.follow('toggle', function(e) {
-                if (e.name === 'content') {
-                    // Переопределяем метод для кнопки меню
-                    if (Lampa.Controller.enabled().name === 'content') {
-                        // Кнопка Options (обычно это долгое нажатие OK или отдельная кнопка)
-                        $(document).off('keydown.rezka_menu').on('keydown.rezka_menu', function(event) {
-                            // Кнопка "Options" или "Menu" на пульте (код может отличаться)
-                            // Обычно это коды: 93, 403, 457
-                            if (event.keyCode === 93 || event.keyCode === 403 || event.keyCode === 457) {
-                                event.preventDefault();
-                                if (last_item && !isModalOpen) {
-                                    comp.contextMenu(last_item);
-                                }
-                            }
-                        });
-                    }
+            // Цветные кнопки пульта Xiaomi
+            $(document).off('keydown.rezka_color').on('keydown.rezka_color', function(event) {
+                if (Lampa.Controller.enabled().name !== 'content') return;
+                
+                // Коды цветных кнопок:
+                // Red: 403
+                // Green: 404  
+                // Yellow: 405
+                // Blue: 406
+                
+                if (event.keyCode === 403 && last_item && !isModalOpen) {
+                    // КРАСНАЯ - Меню управления
+                    event.preventDefault();
+                    comp.contextMenu(last_item);
                 }
             });
             
@@ -469,20 +541,21 @@
         
         comp.pause = function() {
             Lampa.Controller.clear();
-            $(document).off('keydown.rezka_menu');
+            $(document).off('keydown.rezka_color');
         };
         
         comp.stop = function() {};
         
         comp.destroy = function() {
             Lampa.Controller.clear();
-            $(document).off('keydown.rezka_menu');
+            $(document).off('keydown.rezka_color');
             if (scroll) scroll.destroy();
-            html.remove();
+            comp.html.remove();
+            cards = [];
         };
         
         comp.render = function() {
-            return html;
+            return comp.html;
         };
         
         return comp;
