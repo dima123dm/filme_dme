@@ -47,61 +47,62 @@
         };
 
         // ========================================
-        // TMDB API
+        // TMDB API - Поиск по двум названиям
         // ========================================
-        function searchTMDB(searchTitle, year, mediaType, callback) {
-            var url = 'https://api.themoviedb.org/3/search/' + mediaType + 
-                      '?api_key=' + TMDB_API_KEY + 
-                      '&language=ru-RU&query=' + encodeURIComponent(searchTitle);
+        function searchTMDBBoth(titleRu, titleEn, year, mediaType, callback) {
+            var allResults = [];
+            var seenIds = new Set();
+            var completed = 0;
+            var toSearch = [];
             
-            if (year) {
-                url += (mediaType === 'tv' ? '&first_air_date_year=' : '&year=') + year;
+            // Добавляем оба названия для поиска
+            if (titleEn) toSearch.push(titleEn);
+            if (titleRu) toSearch.push(titleRu);
+            
+            if (toSearch.length === 0) {
+                callback([]);
+                return;
             }
             
-            console.log('[Rezka] 🔍 Поиск:', searchTitle, 'год:', year);
+            console.log('[Rezka] 🔍 Поиск по:', toSearch, 'год:', year);
             
-            $.ajax({
-                url: url,
-                method: 'GET',
-                dataType: 'json',
-                success: function(data) {
-                    console.log('[Rezka] ✅ Найдено:', data.results.length);
-                    callback(data.results || []);
-                },
-                error: function(err) {
-                    console.error('[Rezka] ❌ Ошибка TMDB:', err);
-                    callback([]);
+            function checkComplete() {
+                completed++;
+                if (completed === toSearch.length) {
+                    console.log('[Rezka] ✅ Всего найдено уникальных:', allResults.length);
+                    callback(allResults);
                 }
-            });
-        }
-
-        // ========================================
-        // Проверка схожести названий
-        // ========================================
-        function isTitleSimilar(title1, title2) {
-            var t1 = title1.toLowerCase().trim();
-            var t2 = title2.toLowerCase().trim();
-            
-            // Убираем спецсимволы
-            t1 = t1.replace(/[:\-—–]/g, ' ').replace(/\s+/g, ' ').trim();
-            t2 = t2.replace(/[:\-—–]/g, ' ').replace(/\s+/g, ' ').trim();
-            
-            // Точное совпадение
-            if (t1 === t2) return true;
-            
-            // Одно название содержит другое
-            if (t1.indexOf(t2) !== -1 || t2.indexOf(t1) !== -1) return true;
-            
-            // Проверяем первые слова (для "Doctor Who" vs "Doctor Cha")
-            var words1 = t1.split(' ');
-            var words2 = t2.split(' ');
-            
-            // Если оба названия из 2+ слов, проверяем оба слова
-            if (words1.length >= 2 && words2.length >= 2) {
-                return words1[0] === words2[0] && words1[1] === words2[1];
             }
             
-            return false;
+            toSearch.forEach(function(searchTitle) {
+                var url = 'https://api.themoviedb.org/3/search/' + mediaType + 
+                          '?api_key=' + TMDB_API_KEY + 
+                          '&language=ru-RU&query=' + encodeURIComponent(searchTitle);
+                
+                if (year) {
+                    url += (mediaType === 'tv' ? '&first_air_date_year=' : '&year=') + year;
+                }
+                
+                $.ajax({
+                    url: url,
+                    method: 'GET',
+                    dataType: 'json',
+                    success: function(data) {
+                        if (data.results) {
+                            data.results.forEach(function(item) {
+                                if (!seenIds.has(item.id)) {
+                                    seenIds.add(item.id);
+                                    allResults.push(item);
+                                }
+                            });
+                        }
+                        checkComplete();
+                    },
+                    error: function() {
+                        checkComplete();
+                    }
+                });
+            });
         }
 
         // ========================================
@@ -193,10 +194,10 @@
                 var titleRu = parts[0].trim();
                 var titleEn = parts[1] ? parts[1].trim() : '';
                 
-                var titleForSearch = titleEn || titleRu.split(':')[0].trim();
+                // Для отображения - чистое русское
+                var titleRuClean = titleRu.split(':')[0].trim();
 
-                console.log('[Rezka] 📝', titleRu);
-                console.log('[Rezka] 🔍', titleForSearch, year);
+                console.log('[Rezka] 📝 RU:', titleRu, '| EN:', titleEn);
 
                 const isTv = /\/series\/|\/cartoons\//.test(item.url || '');
                 const mediaType = isTv ? 'tv' : 'movie';
@@ -281,19 +282,17 @@
                 card.append(titleDiv);
 
                 // ========================================
-                // КЛИК (обычный и долгий)
+                // КЛИК
                 // ========================================
                 var longPressTimer = null;
                 var isLongPress = false;
 
-                // ✅ ДОЛГОЕ НАЖАТИЕ (удерживание)
                 card.on('hover:focus', function() {
                     isLongPress = false;
                     longPressTimer = setTimeout(function() {
                         isLongPress = true;
-                        console.log('[Rezka] 🔒 Долгое нажатие - принудительный выбор');
                         Lampa.Noty.show('Выбор из списка');
-                    }, 800); // 800ms удерживания
+                    }, 800);
                 });
 
                 card.on('hover:blur', function() {
@@ -303,11 +302,9 @@
                     }
                 });
 
-                // ✅ ОБЫЧНЫЙ КЛИК
                 function handleClick(e) {
                     if (e) e.preventDefault();
                     
-                    // Очищаем таймер
                     if (longPressTimer) {
                         clearTimeout(longPressTimer);
                         longPressTimer = null;
@@ -321,10 +318,11 @@
                     var forceSelect = isLongPress;
                     isLongPress = false;
                     
-                    console.log('[Rezka] 🎯 Клик:', titleRu, forceSelect ? '(принудительный выбор)' : '');
+                    console.log('[Rezka] 🎯 Клик:', titleRu, forceSelect ? '(принудительно)' : '');
                     Lampa.Loading.start(function() {});
 
-                    searchTMDB(titleForSearch, year, mediaType, function(results) {
+                    // ✅ Ищем по обоим названиям
+                    searchTMDBBoth(titleRuClean, titleEn, year, mediaType, function(results) {
                         Lampa.Loading.stop();
 
                         if (!results.length) {
@@ -332,32 +330,29 @@
                             return;
                         }
 
-                        // ✅ Если долгое нажатие - сразу показываем список
+                        // Принудительный выбор
                         if (forceSelect) {
-                            console.log('[Rezka] 📋 Принудительный выбор из списка');
+                            console.log('[Rezka] 📋 Принудительный выбор');
                             showSelectionModal(results, mediaType, function(selected) {
                                 openLampaCard(selected.id, mediaType);
                             });
                             return;
                         }
 
-                        // ✅ Ищем точное совпадение по году И названию
+                        // Ищем точное совпадение по году
                         var exactMatch = null;
                         if (year) {
                             exactMatch = results.find(function(r) {
                                 var rYear = (r.release_date || r.first_air_date || '').substring(0, 4);
-                                var rTitle = r.title || r.name;
-                                
-                                // Год совпадает И название похоже
-                                return rYear === year && isTitleSimilar(titleForSearch, rTitle);
+                                return rYear === year;
                             });
                         }
 
                         if (exactMatch) {
-                            console.log('[Rezka] ✅ Точное совпадение:', exactMatch.title || exactMatch.name);
+                            console.log('[Rezka] ✅ Совпадение по году:', exactMatch.id);
                             openLampaCard(exactMatch.id, mediaType);
                         } else if (results.length === 1) {
-                            console.log('[Rezka] ✅ Один результат:', results[0].id);
+                            console.log('[Rezka] ✅ Один результат');
                             openLampaCard(results[0].id, mediaType);
                         } else {
                             console.log('[Rezka] 📋 Несколько вариантов');
