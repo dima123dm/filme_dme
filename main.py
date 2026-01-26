@@ -265,6 +265,16 @@ def move_item(req: MoveRequest):
 if not os.path.exists("static"):
     os.makedirs("static")
 
+if not os.path.exists("plugin"):
+    os.makedirs("plugin")
+
+@app.get("/plugin/{file_path:path}")
+async def serve_plugin_no_cache(file_path: str):
+    response = FileResponse(f"plugin/{file_path}")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
 @app.get("/static/{file_path:path}")
 async def serve_static_no_cache(file_path: str):
     response = FileResponse(f"static/{file_path}")
