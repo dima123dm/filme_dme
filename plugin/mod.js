@@ -72,6 +72,13 @@
         comp.renderList = function() {
             comp.html.empty();
 
+            // ВНЕДРЯЕМ CSS СТИЛИ ДЛЯ КНОПКИ СОРТИРОВКИ (ЧТОБЫ ТОЧНО ПОДСВЕЧИВАЛАСЬ)
+            var style = $('<style>' +
+                '.rezka-sort-btn { transition: all 0.2s; border: 2px solid transparent; }' +
+                '.rezka-sort-btn.focus { background-color: #ffffff !important; color: #000000 !important; border-color: #ffffff !important; transform: scale(1.1) !important; box-shadow: 0 0 20px rgba(255,255,255,0.7) !important; z-index: 100; }' +
+                '</style>');
+            comp.html.append(style);
+
             // Создаем контейнер для скролла
             scroll_wrapper = $('<div class="rezka-scroll-wrapper"></div>');
             scroll_wrapper.css({
@@ -101,8 +108,7 @@
                 'background': 'rgba(255,255,255,0.1)',
                 'font-size': '16px',
                 'cursor': 'pointer',
-                'transition': 'all 0.2s',
-                'border': '2px solid transparent'
+                'border': '2px solid rgba(255,255,255,0.1)'
             });
 
             // События кнопки сортировки
@@ -112,21 +118,7 @@
             
             sortBtn.on('hover:focus', function() {
                 last_item = sortBtn;
-                $(this).css({
-                    'background': '#fff',
-                    'color': '#000',
-                    'transform': 'scale(1.05)',
-                    'box-shadow': '0 0 15px rgba(255,255,255,0.3)'
-                });
-            });
-            
-            sortBtn.on('hover:blur', function() {
-                $(this).css({
-                    'background': 'rgba(255,255,255,0.1)',
-                    'color': '#fff',
-                    'transform': 'scale(1)',
-                    'box-shadow': 'none'
-                });
+                // Стили применяются через класс .focus в CSS выше
             });
 
             header.append(sortBtn);
@@ -293,7 +285,7 @@
                     if (cardTop > containerHeight - 180) {
                         scroll_wrapper.stop().animate({ scrollTop: scrollTop + 250 }, 200);
                     }
-                    // Карточка ушла вверх
+                    // Карточка ушла вверх (под хедер)
                     if (cardTop < headerHeight + 20) {
                         scroll_wrapper.stop().animate({ scrollTop: scrollTop - 250 }, 200);
                     }
@@ -530,16 +522,12 @@
         };
 
         comp.action = function(action, item) {
-            // ИСПРАВЛЕНИЕ: Более надежный поиск ID (любые цифры в URL)
-            var match = item.url.match(/(\d+)/);
-            var postId = match ? match[1] : null;
-            
-            if (!postId) { Lampa.Noty.show('Не найден ID фильма'); return; }
-            
+            var postId = item.url.match(/\/(\d+)-/);
+            postId = postId ? postId[1] : null;
+            if (!postId) { Lampa.Noty.show('Нет ID'); return; }
             Lampa.Loading.start(function() {});
             var endpoint = action === 'delete' ? '/api/delete' : '/api/move';
             var data = action === 'delete' ? { post_id: postId, category: category } : { post_id: postId, from_category: category, to_category: action.replace('move_', '') };
-            
             $.ajax({
                 url: MY_API_URL + endpoint, method: 'POST', contentType: 'application/json', data: JSON.stringify(data),
                 success: function(res) { 
@@ -631,9 +619,13 @@
         }, 1000);
 
         Lampa.Listener.follow('activity', function(e) {
-            if (e.type === 'active' && e.component.indexOf('rezka_') === 0) Lampa.Controller.toggle('rezka');
+            if (e.type === 'active' && e.component.indexOf('rezka_') === 0) {
+                Lampa.Controller.toggle('rezka');
+            }
         });
     }
 
-    if (window.Lampa && Lampa.Listener) Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
+    if (window.Lampa && Lampa.Listener) {
+        Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
+    }
 })();
