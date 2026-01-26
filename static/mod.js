@@ -2,7 +2,7 @@
     'use strict';
 
     // Твой сервер
-    var MY_API_URL = 'http://127.0.0.1:8080';
+    var MY_API_URL = 'https://filme.127.0.0.1.sslip.io';
 
     function MyRezkaComponent(object) {
         var comp = new Lampa.Component(object, {
