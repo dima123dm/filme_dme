@@ -2,13 +2,13 @@ import asyncio
 import json
 import logging
 import os
+import time  # Добавлено для генерации уникальной ссылки
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import WebAppInfo
 from dotenv import load_dotenv
 
 # Импортируем класс клиента из файла rezka_client.py
-# Убедитесь, что файл называется именно rezka_client.py
 from rezka_client import RezkaClient
 
 load_dotenv()
@@ -18,14 +18,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- КОНФИГУРАЦИЯ ---
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Исправлено имя переменной под ваш .env
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") 
 WEBAPP_URL = os.getenv("WEBAPP_URL", "http://127.0.0.1:8080")
 CAT_WATCHING = os.getenv("REZKA_CAT_WATCHING")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 STATE_FILE = "series_state.json"
 
 # --- ИНИЦИАЛИЗАЦИЯ ОБЪЕКТОВ ---
-# Именно эти переменные (client, bot, dp) ищет main.py при импорте
 if not BOT_TOKEN:
     logger.error("❌ Ошибка: Не задан TELEGRAM_BOT_TOKEN в .env")
 
@@ -61,9 +60,12 @@ async def cmd_start(message: types.Message):
         TELEGRAM_CHAT_ID = str(message.chat.id)
         logger.info(f"✅ Chat ID установлен: {TELEGRAM_CHAT_ID}")
 
+    # Добавляем метку времени к URL, чтобы сбросить кэш в Telegram WebApp
+    url_no_cache = f"{WEBAPP_URL}?v={int(time.time())}"
+
     # Кнопка для открытия WebApp
     markup = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="🎬 Открыть HDRezka", web_app=WebAppInfo(url=WEBAPP_URL))]
+        [types.InlineKeyboardButton(text="🎬 Открыть HDRezka", web_app=WebAppInfo(url=url_no_cache))]
     ])
     await message.answer(
         "👋 Привет! Я буду присылать уведомления о новых сериях.\n"
