@@ -9,10 +9,10 @@
     function RezkaCategory(category) {
         var comp = {};
         comp.html = $('<div class="category-items"></div>');
-        var scroll = null;
+        var scroll_wrapper = null; // Контейнер для ручного скролла
         var isModalOpen = false;
         var last_item = null;
-        var sideButtons = null; // Ссылка на боковые кнопки
+        var side_panel = null;
 
         var endpoints = {
             'watching': '/api/watching',
@@ -46,104 +46,113 @@
         };
 
         comp.build = function(items) {
-            if (scroll) scroll.destroy();
-
-            // Создаем скролл
-            scroll = new Lampa.Scroll({
-                horizontal: false,
-                step: 250
+            // Создаем свою обертку для скролла, чтобы не зависеть от капризов Lampa
+            scroll_wrapper = $('<div class="rezka-scroll-wrapper"></div>');
+            scroll_wrapper.css({
+                'overflow-y': 'hidden', // Скрываем полосу прокрутки
+                'height': '100%',
+                'width': '100%',
+                'position': 'relative'
             });
 
             var grid = $('<div class="rezka-grid"></div>');
-            
-            // ВЕРНУЛ СТАНДАРТНЫЙ РАЗМЕР КАРТОЧЕК (140px)
             grid.css({
                 'display': 'grid',
-                'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))',
+                'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))', // Стандартный размер
                 'gap': '15px',
-                'padding': '15px',
-                'padding-right': '60px' // Небольшой отступ для кнопок, не ломающий сетку
+                'padding': '20px',
+                'padding-right': '70px', // Место под кнопки
+                'padding-bottom': '100px'
             });
 
             items.forEach(function(item) {
                 grid.append(comp.card(item));
             });
 
-            scroll.append(grid);
-            comp.html.append(scroll.render());
+            scroll_wrapper.append(grid);
+            comp.html.empty().append(scroll_wrapper);
 
-            // Создаем кнопки управления СПРАВА
+            // Создаем кнопки управления
             comp.createSideControls();
 
+            // Запускаем контроллер
             comp.start();
+            
+            // Фокус на первый элемент
+            setTimeout(function() {
+                if(!last_item) last_item = grid.find('.selector').first();
+                Lampa.Controller.toggle('rezka');
+            }, 200);
         };
 
-        // --- НОВЫЕ АККУРАТНЫЕ КНОПКИ СПРАВА ---
-        comp.createSideControls = function() {
-            if (sideButtons) sideButtons.remove();
+        // --- РУЧНОЙ СКРОЛЛ ---
+        comp.manualScroll = function(direction) {
+            if (!scroll_wrapper) return;
+            var current = scroll_wrapper.scrollTop();
+            var step = 300;
+            var dest = direction === 'down' ? current + step : current - step;
+            scroll_wrapper.stop().animate({ scrollTop: dest }, 200);
+        };
 
-            sideButtons = $('<div class="rezka-side-panel"></div>');
-            
-            // Стиль панели: фиксирована справа по центру
-            sideButtons.css({
-                'position': 'fixed',
+        // --- БОКОВЫЕ КНОПКИ ---
+        comp.createSideControls = function() {
+            if (side_panel) side_panel.remove();
+
+            side_panel = $('<div class="rezka-side-panel"></div>');
+            side_panel.css({
+                'position': 'absolute',
                 'right': '10px',
-                'top': '50%',
-                'transform': 'translateY(-50%)',
+                'top': '0',
+                'bottom': '0',
+                'width': '60px',
                 'display': 'flex',
                 'flex-direction': 'column',
-                'gap': '15px',
-                'z-index': '9999', // Поверх всего
-                'pointer-events': 'none' // Чтобы прозрачные части не мешали
+                'justify-content': 'center',
+                'gap': '20px',
+                'z-index': '100',
+                'pointer-events': 'none'
             });
 
             var btnStyle = {
-                'width': '40px',
-                'height': '40px',
-                'background': 'rgba(0, 0, 0, 0.6)',
-                'border': '1px solid rgba(255,255,255,0.2)',
+                'width': '50px',
+                'height': '50px',
+                'background': 'rgba(0,0,0,0.6)',
+                'border': '2px solid rgba(255,255,255,0.3)',
                 'border-radius': '50%',
                 'display': 'flex',
                 'align-items': 'center',
                 'justify-content': 'center',
                 'color': '#fff',
-                'font-size': '20px',
-                'cursor': 'pointer',
-                'pointer-events': 'auto', // Кнопки кликабельны
+                'font-size': '24px',
+                'pointer-events': 'auto',
                 'transition': 'all 0.2s'
             };
 
             // Кнопка ВВЕРХ
-            var upBtn = $('<div class="selector">▲</div>').css(btnStyle);
-            upBtn.on('hover:enter', function() {
-                try { if(scroll) scroll.minus(); } catch(e){}
+            var btnUp = $('<div class="selector rezka-btn">▲</div>').css(btnStyle);
+            btnUp.on('hover:enter', function() { comp.manualScroll('up'); });
+            btnUp.on('hover:focus', function() {
+                last_item = $(this);
+                $(this).css({'background': '#fff', 'color': '#000', 'transform': 'scale(1.15)', 'border-color': '#fff'});
             });
-            upBtn.on('hover:focus', function() {
-                last_item = upBtn;
-                $(this).css({'background': '#fff', 'color': '#000', 'transform': 'scale(1.2)'});
-            });
-            upBtn.on('hover:blur', function() {
-                $(this).css(btnStyle).css('transform', 'scale(1)');
+            btnUp.on('hover:blur', function() {
+                $(this).css(btnStyle).css({'background': 'rgba(0,0,0,0.6)', 'color': '#fff', 'transform': 'scale(1)'});
             });
 
             // Кнопка ВНИЗ
-            var downBtn = $('<div class="selector">▼</div>').css(btnStyle);
-            downBtn.on('hover:enter', function() {
-                try { if(scroll) scroll.plus(); } catch(e){}
+            var btnDown = $('<div class="selector rezka-btn">▼</div>').css(btnStyle);
+            btnDown.on('hover:enter', function() { comp.manualScroll('down'); });
+            btnDown.on('hover:focus', function() {
+                last_item = $(this);
+                $(this).css({'background': '#fff', 'color': '#000', 'transform': 'scale(1.15)', 'border-color': '#fff'});
             });
-            downBtn.on('hover:focus', function() {
-                last_item = downBtn;
-                $(this).css({'background': '#fff', 'color': '#000', 'transform': 'scale(1.2)'});
-            });
-            downBtn.on('hover:blur', function() {
-                $(this).css(btnStyle).css('transform', 'scale(1)');
+            btnDown.on('hover:blur', function() {
+                $(this).css(btnStyle).css({'background': 'rgba(0,0,0,0.6)', 'color': '#fff', 'transform': 'scale(1)'});
             });
 
-            sideButtons.append(upBtn);
-            sideButtons.append(downBtn);
-
-            // Добавляем панель в DOM
-            comp.html.append(sideButtons);
+            side_panel.append(btnUp);
+            side_panel.append(btnDown);
+            comp.html.append(side_panel);
         };
 
         comp.card = function(item) {
@@ -167,16 +176,16 @@
                 'border-radius': '8px',
                 'overflow': 'hidden',
                 'transition': 'transform 0.2s',
-                'background-color': '#222'
+                'background-color': '#202020'
             });
 
             var poster = $('<div></div>');
             poster.css({
                 'width': '100%',
-                'padding-bottom': '150%', // Стандартное соотношение постера
+                'padding-bottom': '150%',
                 'position': 'relative',
                 'background-image': posterUrl ? 'url(' + posterUrl + ')' : 'none',
-                'background-color': '#333',
+                'background-color': '#303030',
                 'background-size': 'cover',
                 'background-position': 'center'
             });
@@ -203,13 +212,31 @@
 
             card.data('item', item);
 
+            // ЛОГИКА ФОКУСА
             card.on('hover:focus', function() {
-                last_item = item;
-                // Мягкое обновление скролла
-                try { if(scroll) scroll.update($(this)); } catch(e) {}
+                last_item = $(this);
+                
+                // Сбрас подсветки с кнопок (fix залипания)
+                $('.rezka-btn').trigger('hover:blur');
 
                 $('.rezka-card').css({'transform': 'scale(1)', 'box-shadow': 'none', 'z-index': '1'});
-                $(this).css({'transform': 'scale(1.05)', 'box-shadow': '0 5px 15px rgba(0,0,0,0.5)', 'z-index': '10'});
+                $(this).css({'transform': 'scale(1.05)', 'box-shadow': '0 8px 20px rgba(0,0,0,0.5)', 'z-index': '10'});
+
+                // Автоматическая подкрутка (Manual Scroll Update)
+                if (scroll_wrapper) {
+                    var cardTop = $(this).position().top;
+                    var containerHeight = scroll_wrapper.height();
+                    var scrollTop = scroll_wrapper.scrollTop();
+                    
+                    // Если карточка ушла вниз
+                    if (cardTop > containerHeight - 180) {
+                        scroll_wrapper.stop().animate({ scrollTop: scrollTop + 200 }, 200);
+                    }
+                    // Если карточка ушла вверх
+                    if (cardTop < 50) {
+                        scroll_wrapper.stop().animate({ scrollTop: scrollTop - 200 }, 200);
+                    }
+                }
             });
 
             card.on('hover:blur', function() {
@@ -229,7 +256,7 @@
             return card;
         };
 
-        // --- ПОИСК И ОТКРЫТИЕ (Стандартная логика) ---
+        // --- ЛОГИКА ПОИСКА (Восстановлена полная версия) ---
         comp.search = function(titleRu, titleEn, year, mediaType) {
             Lampa.Loading.start(function() {});
             var allResults = [];
@@ -299,7 +326,7 @@
             Lampa.Activity.push({ component: 'full', id: tmdbId, method: mediaType, source: 'tmdb', card: { id: tmdbId, source: 'tmdb' } });
         };
 
-        // --- МЕНЮ УПРАВЛЕНИЯ ---
+        // --- МЕНЮ УПРАВЛЕНИЯ И СЕРИИ (Восстановлена полная версия) ---
         comp.menu = function(item) {
             if (isModalOpen) return; isModalOpen = true;
             var isTv = /\/series\/|\/cartoons\//.test(item.url || '');
@@ -398,6 +425,7 @@
             Lampa.Activity.replace({ component: 'rezka_' + category, page: 1 });
         };
 
+        // --- УПРАВЛЕНИЕ ---
         comp.start = function() {
             Lampa.Controller.add('rezka', {
                 toggle: function() {
@@ -426,7 +454,7 @@
             Lampa.Controller.toggle('rezka');
         };
 
-        // Fix for "back button" bug
+        // Исправление бага "Назад": восстанавливаем контроллер при возврате
         comp.onResume = function() {
             Lampa.Controller.toggle('rezka');
         };
@@ -434,9 +462,8 @@
         comp.pause = function() {};
 
         comp.destroy = function() {
-            if (scroll) scroll.destroy();
-            scroll = null;
-            if (sideButtons) sideButtons.remove();
+            Lampa.Controller.clear();
+            if (side_panel) side_panel.remove();
             comp.html.remove();
         };
 
@@ -450,6 +477,7 @@
         function createComponent(name, category) {
             Lampa.Component.add(name, function() {
                 var c = new RezkaCategory(category);
+                // Подключаем хук восстановления активности
                 c.activity_resume = function() { if (c.onResume) c.onResume(); };
                 return c;
             });
@@ -473,6 +501,7 @@
             });
         }, 1000);
 
+        // Глобальный слушатель для гарантии восстановления фокуса
         Lampa.Listener.follow('activity', function(e) {
             if (e.type === 'active' && e.component.indexOf('rezka_') === 0) {
                 Lampa.Controller.toggle('rezka');
