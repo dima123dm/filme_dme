@@ -3,9 +3,9 @@
     // Прямой адрес сервера
     var MY_API_URL = 'http://64.188.67.85:8080';
     function MyRezkaComponent(object) {
+        Lampa.InteractionMain.call(this, object);
         this.name = 'my_rezka';
         this.genre_id = -1;
-
         this.create = function () {
             this.activity.loader(true);
             // УВЕДОМЛЕНИЕ 1: Сообщаем о начале попытки
