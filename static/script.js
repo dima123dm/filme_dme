@@ -3,20 +3,29 @@ tg.expand();
 
 // Текущая выбранная категория
 let currentCategory = 'watching';
-// Кэш (теперь хранит уже отсортированные сервером данные)
+// Кэш (хранит данные, пришедшие с сервера)
 let allLoadedItems = [];
-// Текущий метод сортировки
+// Текущий метод сортировки (по умолчанию 'added')
 let currentSort = 'added';
+
+// Функция смены сортировки через <select>
+function changeSort(val) {
+    currentSort = val;
+    // При смене сортировки загружаем данные заново с сервера
+    loadGrid(currentCategory);
+}
 
 // Переключение вкладок
 async function switchTab(cat, btn) {
     currentCategory = cat;
+    
+    // Скрываем поиск, показываем сетку
     document.getElementById('search-ui').style.display = 'none';
     document.getElementById('grid').style.display = 'grid';
     
-    // Проверяем наличие панели перед обращением
-    const topBar = document.querySelector('.top-bar');
-    if (topBar) topBar.style.display = 'flex';
+    // Показываем тулбар сортировки (если мы не в поиске)
+    const toolbar = document.getElementById('toolbar');
+    if (toolbar) toolbar.style.display = 'flex';
     
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
@@ -24,40 +33,11 @@ async function switchTab(cat, btn) {
     loadGrid(cat);
 }
 
-// Управление меню сортировки
-function toggleSortMenu() {
-    const menu = document.getElementById('sort-menu');
-    const overlay = document.getElementById('sort-overlay');
-    
-    if (!menu || !overlay) return;
-
-    if (menu.style.display === 'none' || menu.style.display === '') {
-        menu.style.display = 'block';
-        overlay.style.display = 'block';
-        // Подсветка текущей
-        document.querySelectorAll('.sort-item').forEach(el => el.classList.remove('active'));
-        // Ищем элемент, чей onclick содержит текущую сортировку
-        const activeItem = [...document.querySelectorAll('.sort-item')].find(el => el.getAttribute('onclick') && el.getAttribute('onclick').includes(currentSort));
-        if (activeItem) activeItem.classList.add('active');
-    } else {
-        menu.style.display = 'none';
-        overlay.style.display = 'none';
-    }
-}
-
-function applySort(type) {
-    currentSort = type;
-    toggleSortMenu();
-    // При смене сортировки загружаем данные заново с сервера с учетом нового фильтра
-    loadGrid(currentCategory);
-}
-
-// Функция отрисовки (берет данные как есть, так как они сортируются сервером)
+// Функция отрисовки (просто выводит данные)
 function renderSortedGrid() {
     const grid = document.getElementById('grid');
     grid.innerHTML = '';
     
-    // Используем allLoadedItems напрямую, сервер уже вернул нужный порядок
     const sorted = allLoadedItems;
     
     if (!sorted || sorted.length === 0) {
@@ -72,12 +52,9 @@ function renderSortedGrid() {
         
         const cleanTitle = item.title.replace(/\s*\(\d{4}\)/, '');
         
-        // Отображаем год, если сортировка по годам
+        // Если выбран фильтр "По году", отображаем год на карточке
         let yearHtml = '';
-        if (currentSort.includes('year') && item.year) {
-             yearHtml = `<div class="card-year" style="position:absolute; top:5px; right:5px; background:#d2a028; color:#000; padding:2px 6px; border-radius:4px; font-size:11px; font-weight:bold; z-index:2;">${item.year}</div>`;
-        } else if (item.year) {
-             // Можно оставить отображение года всегда, если есть стиль .card-year
+        if (currentSort === 'year' && item.year) {
              yearHtml = `<div class="card-year">${item.year}</div>`;
         }
 
@@ -94,18 +71,15 @@ function renderSortedGrid() {
     });
 }
 
+// Загрузка сетки
 async function loadGrid(cat) {
     const grid = document.getElementById('grid');
     grid.innerHTML = '<div style="grid-column:span 2; text-align:center; padding:30px; color:#666">Загрузка...</div>';
     
     try {
-        // Преобразуем локальный тип сортировки в параметр API (added, year, popular)
-        let serverSortParam = 'added';
-        if (currentSort.indexOf('year') !== -1) serverSortParam = 'year';
-        if (currentSort.indexOf('popular') !== -1) serverSortParam = 'popular';
-        
-        // Делаем запрос к API с параметром sort
-        const res = await fetch(`/api/${cat}?sort=${serverSortParam}`);
+        // Передаем параметр сортировки на сервер
+        // Сервер поддерживает: added, year, popular
+        const res = await fetch(`/api/${cat}?sort=${currentSort}`);
         const data = await res.json();
         
         if (!data || data.length === 0) {
@@ -133,14 +107,6 @@ async function openDetails(url, title, poster) {
     document.getElementById('det-title').innerText = title;
     document.getElementById('det-controls').style.display = 'none';
     
-    const siteLink = document.getElementById('det-site-link');
-    if (siteLink) siteLink.href = url;
-
-    currentPostId = null; 
-    
-    const match = url.match(/\/(\d+)-/);
-    if (match) currentPostId = match[1];
-
     const franchiseContainer = document.getElementById('det-franchises');
     if (franchiseContainer) franchiseContainer.innerHTML = '';
 
@@ -273,8 +239,8 @@ function openSearch(btn) {
     document.getElementById('grid').style.display = 'none';
     
     // Скрываем панель сортировки в поиске
-    const topBar = document.querySelector('.top-bar');
-    if (topBar) topBar.style.display = 'none';
+    const toolbar = document.getElementById('toolbar');
+    if (toolbar) toolbar.style.display = 'none';
 
     document.getElementById('search-ui').style.display = 'block';
     const input = document.getElementById('q');
