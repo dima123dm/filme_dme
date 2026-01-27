@@ -3,9 +3,9 @@ tg.expand();
 
 // Текущая выбранная категория
 let currentCategory = 'watching';
-// Кэш (теперь хранит то, что прислал сервер)
+// Кэш (теперь хранит уже отсортированные сервером данные)
 let allLoadedItems = [];
-// Текущий метод сортировки (по умолчанию 'added')
+// Текущий метод сортировки
 let currentSort = 'added';
 
 // Переключение вкладок
@@ -28,7 +28,7 @@ async function switchTab(cat, btn) {
 function toggleSortMenu() {
     const menu = document.getElementById('sort-menu');
     const overlay = document.getElementById('sort-overlay');
-    // Проверка на существование элементов (на случай другой верстки)
+    
     if (!menu || !overlay) return;
 
     if (menu.style.display === 'none' || menu.style.display === '') {
@@ -36,7 +36,8 @@ function toggleSortMenu() {
         overlay.style.display = 'block';
         // Подсветка текущей
         document.querySelectorAll('.sort-item').forEach(el => el.classList.remove('active'));
-        const activeItem = [...document.querySelectorAll('.sort-item')].find(el => el.getAttribute('onclick').includes(currentSort));
+        // Ищем элемент, чей onclick содержит текущую сортировку
+        const activeItem = [...document.querySelectorAll('.sort-item')].find(el => el.getAttribute('onclick') && el.getAttribute('onclick').includes(currentSort));
         if (activeItem) activeItem.classList.add('active');
     } else {
         menu.style.display = 'none';
@@ -47,33 +48,42 @@ function toggleSortMenu() {
 function applySort(type) {
     currentSort = type;
     toggleSortMenu();
-    // При смене сортировки теперь перезагружаем данные с сервера
+    // При смене сортировки загружаем данные заново с сервера с учетом нового фильтра
     loadGrid(currentCategory);
 }
 
-// Функция отрисовки (больше не сортирует, а просто выводит полученное)
+// Функция отрисовки (берет данные как есть, так как они сортируются сервером)
 function renderSortedGrid() {
     const grid = document.getElementById('grid');
     grid.innerHTML = '';
     
-    // Используем данные как есть (они уже отсортированы сервером)
-    const items = allLoadedItems;
+    // Используем allLoadedItems напрямую, сервер уже вернул нужный порядок
+    const sorted = allLoadedItems;
     
-    if (!items || items.length === 0) {
+    if (!sorted || sorted.length === 0) {
         grid.innerHTML = '<div style="grid-column:span 2; text-align:center; padding:30px; color:#666">Список пуст</div>';
         return;
     }
     
-    items.forEach(item => {
+    sorted.forEach(item => {
         const div = document.createElement('div');
         div.className = 'card';
         div.onclick = () => openDetails(item.url, item.title, item.poster);
         
         const cleanTitle = item.title.replace(/\s*\(\d{4}\)/, '');
         
+        // Отображаем год, если сортировка по годам
+        let yearHtml = '';
+        if (currentSort.includes('year') && item.year) {
+             yearHtml = `<div class="card-year" style="position:absolute; top:5px; right:5px; background:#d2a028; color:#000; padding:2px 6px; border-radius:4px; font-size:11px; font-weight:bold; z-index:2;">${item.year}</div>`;
+        } else if (item.year) {
+             // Можно оставить отображение года всегда, если есть стиль .card-year
+             yearHtml = `<div class="card-year">${item.year}</div>`;
+        }
+
         div.innerHTML = `
             <div class="card-badge">${item.status || 'Фильм'}</div>
-            ${item.year ? `<div class="card-year">${item.year}</div>` : ''}
+            ${yearHtml}
             <img src="${item.poster}" loading="lazy">
             <div class="card-content">
                 <div class="card-title">${cleanTitle}</div>
@@ -89,12 +99,13 @@ async function loadGrid(cat) {
     grid.innerHTML = '<div style="grid-column:span 2; text-align:center; padding:30px; color:#666">Загрузка...</div>';
     
     try {
-        // Преобразуем параметры сортировки для сервера
-        let serverSort = 'added';
-        if (currentSort.includes('year')) serverSort = 'year';
-        if (currentSort.includes('popular')) serverSort = 'popular';
+        // Преобразуем локальный тип сортировки в параметр API (added, year, popular)
+        let serverSortParam = 'added';
+        if (currentSort.indexOf('year') !== -1) serverSortParam = 'year';
+        if (currentSort.indexOf('popular') !== -1) serverSortParam = 'popular';
         
-        const res = await fetch(`/api/${cat}?sort=${serverSort}`);
+        // Делаем запрос к API с параметром sort
+        const res = await fetch(`/api/${cat}?sort=${serverSortParam}`);
         const data = await res.json();
         
         if (!data || data.length === 0) {
@@ -289,7 +300,6 @@ function doSearch(val) {
             const div = document.createElement('div');
             div.className = 'search-item';
             
-            // Защита от undefined title
             let titleHTML = item.title || 'Без названия';
             
             div.innerHTML = `
