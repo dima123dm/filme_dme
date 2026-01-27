@@ -36,8 +36,12 @@ class RezkaClient:
         self.origin: str = base_url or os.getenv("REZKA_DOMAIN", "https://hdrezka.me")
 
     def auth(self) -> bool:
+        """Авторизация. Если уже залогинены, делаем ping-проверку (опционально) или просто возвращаем True."""
+        # Можно добавить принудительную проверку, но пока доверяем флагу,
+        # сбрасывая его при ошибках получения данных.
         if self.is_logged_in:
             return True
+            
         try:
             print("🔑 Попытка авторизации...")
             headers = {"X-Requested-With": "XMLHttpRequest"}
@@ -381,75 +385,104 @@ class RezkaClient:
 
     def get_category_items_paginated(self, cat_id: str, max_pages: int = 5, sort_by: str = "added") -> List[Dict[str, Any]]:
         """
-        Собирает элементы с поддержкой серверной сортировки HDRezka.
-        Использует параметры URL:
-        - filter=added (По дате добавления)
-        - filter=year (По году выпуска)
-        - filter=popular (Популярные)
+        Собирает элементы с поддержкой серверной сортировки и АВТО-РЕЛОГИНОМ при потере сессии.
         """
-        all_items: List[Dict[str, Any]] = []
-        seen_ids: set[str] = set()
-        if not self.auth():
-            return []
+        # Попытка выполнить запрос до 2-х раз (если сессия протухла, пробуем перезайти)
+        for attempt in range(2):
+            all_items: List[Dict[str, Any]] = []
+            seen_ids: set[str] = set()
             
-        # Формируем правильный параметр фильтрации
-        # Дефолтное значение для резки - это 'filter=added' (или без параметра)
-        filter_param = "filter=added"
-        
-        if sort_by == "year":
-            filter_param = "filter=year"
-        elif sort_by == "popular":
-            filter_param = "filter=popular"
-        
-        for page in range(1, max_pages + 1):
-            try:
-                # Базовый URL категории
-                url_page = f"{self.origin}/favorites/{cat_id}/"
+            if not self.auth():
+                # Если авторизация не прошла, и это была первая попытка, пробуем еще раз в след. итерации
+                if attempt == 0:
+                     self.is_logged_in = False
+                     continue
+                return []
                 
-                # Добавляем пагинацию, если это не первая страница
-                if page > 1:
-                    url_page = f"{url_page}page/{page}/"
-                
-                # Добавляем фильтр (параметры запроса идут после ?)
-                url_page = f"{url_page}?{filter_param}"
-                
-                r = self.session.get(url_page)
-                soup = BeautifulSoup(r.text, "html.parser")
-                items_page: List[Dict[str, Any]] = []
-                for item in soup.find_all(class_="b-content__inline_item"):
-                    try:
-                        item_id = item.get("data-id")
-                        if not item_id or item_id in seen_ids:
-                            continue
-                        link = item.find(class_="b-content__inline_item-link").find("a")
-                        img = item.find(class_="b-content__inline_item-cover").find("img")
-                        status = item.find(class_="info")
-                        
-                        full_title = link.get_text(strip=True) if link else ""
-                        year = ""
-                        match_year = re.search(r'\((\d{4})\)', full_title)
-                        if match_year:
-                            year = match_year.group(1)
+            filter_param = "filter=added"
+            if sort_by == "year":
+                filter_param = "filter=year"
+            elif sort_by == "popular":
+                filter_param = "filter=popular"
+            
+            # Если это ретрай после перелогина, сбрасываем состояние
+            success_fetch = False 
+            
+            for page in range(1, max_pages + 1):
+                try:
+                    url_page = f"{self.origin}/favorites/{cat_id}/"
+                    if page > 1:
+                        url_page = f"{url_page}page/{page}/"
+                    
+                    url_page = f"{url_page}?{filter_param}"
+                    print(f"DEBUG: Запрос {url_page}")
+                    
+                    r = self.session.get(url_page)
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    items_page: List[Dict[str, Any]] = []
+                    
+                    # Если страница вернула форму логина или нет контента
+                    if soup.find("input", {"name": "login_name"}) or "Авторизация" in r.text:
+                         print("DEBUG: Обнаружена страница входа вместо контента")
+                         break # Выходим из цикла страниц, попадем в проверку success_fetch
 
-                        items_page.append(
-                            {
-                                "id": item_id,
-                                "title": full_title,
-                                "url": link.get("href") if link else "",
-                                "poster": img.get("src") if img else "",
-                                "status": status.get_text(strip=True) if status else "",
-                                "year": year
-                            }
-                        )
-                        seen_ids.add(item_id)
-                    except Exception:
-                        continue
-                if not items_page:
+                    for item in soup.find_all(class_="b-content__inline_item"):
+                        try:
+                            item_id = item.get("data-id")
+                            if not item_id or item_id in seen_ids:
+                                continue
+                            link = item.find(class_="b-content__inline_item-link").find("a")
+                            img = item.find(class_="b-content__inline_item-cover").find("img")
+                            status = item.find(class_="info")
+                            
+                            full_title = link.get_text(strip=True) if link else ""
+                            year = ""
+                            match_year = re.search(r'\((\d{4})\)', full_title)
+                            if match_year:
+                                year = match_year.group(1)
+
+                            items_page.append(
+                                {
+                                    "id": item_id,
+                                    "title": full_title,
+                                    "url": link.get("href") if link else "",
+                                    "poster": img.get("src") if img else "",
+                                    "status": status.get_text(strip=True) if status else "",
+                                    "year": year
+                                }
+                            )
+                            seen_ids.add(item_id)
+                        except Exception:
+                            continue
+                    
+                    if items_page:
+                        success_fetch = True
+                        all_items.extend(items_page)
+                    else:
+                        # Если на первой странице пусто и мы уверены, что там что-то должно быть
+                        if page == 1:
+                            pass # Может быть реально пусто
+                        break # Если просто кончились страницы
+                        
+                except Exception as e:
+                    print(f"ERROR Fetching page: {e}")
                     break
-                all_items.extend(items_page)
-            except Exception:
-                break
-        return all_items
+            
+            # Если мы получили элементы ИЛИ если мы явно получили пустой список (но запрос прошел успешно)
+            # считаем что все ок.
+            # НО: если элементов 0 и это первая попытка, возможно сессия слетела "тихо".
+            if all_items:
+                return all_items
+            
+            # Если 0 элементов, попробуем сбросить сессию и повторить
+            if attempt == 0:
+                print("🔄 Получено 0 элементов. Возможно, истекла сессия. Переавторизация...")
+                self.is_logged_in = False
+                # Цикл продолжится, вызовет auth() заново
+            else:
+                return [] # Вторая попытка тоже пустая, значит реально пусто
+
+        return []
 
     def toggle_watch(self, global_id: str, referer: Optional[str] = None) -> bool:
         if not self.auth():
