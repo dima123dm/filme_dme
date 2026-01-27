@@ -13,19 +13,11 @@ load_dotenv()
 
 class RezkaClient:
     """
-    Клиент для работы с HDRezka. Содержит методы для авторизации,
-    получения информации о сериалах, работе с закладками, франшизами
-    и изменением статуса эпизодов.
+    Клиент для работы с HDRezka.
     """
 
     def __init__(self, base_url: Optional[str] = None) -> None:
-        """
-        Создаёт сессию для работы с HDRezka. Принимает необязательный base_url.
-        """
-        # Инициализируем curl session с маскировкой Chrome
         self.session = curl_requests.Session(impersonate="chrome110")
-        
-        # ВАЖНО: Устанавливаем User-Agent один раз для всей сессии
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
             "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -41,11 +33,9 @@ class RezkaClient:
         self.login = os.getenv("REZKA_LOGIN")
         self.password = os.getenv("REZKA_PASS")
         self.is_logged_in = False
-        # Основной домен для запросов
         self.origin: str = base_url or os.getenv("REZKA_DOMAIN", "https://hdrezka.me")
 
     def auth(self) -> bool:
-        """Авторизация на HDRezka. Возвращает True при успехе."""
         if self.is_logged_in:
             return True
         try:
@@ -74,7 +64,6 @@ class RezkaClient:
     # Внутренние методы парсинга
     # ------------------------
     def _is_watched_check(self, element: Any) -> bool:
-        """Определяет, отмечен ли элемент как просмотренный."""
         if not element:
             return False
         classes = element.get("class", [])
@@ -361,7 +350,6 @@ class RezkaClient:
     # Работа с закладками
     # ------------------------
     def get_category_items(self, cat_id: str) -> List[Dict[str, Any]]:
-        # Для совместимости, вызывает paginated с 1 страницей
         return self.get_category_items_paginated(cat_id, max_pages=1)
 
     def add_favorite(self, post_id: str, cat_id: str) -> bool:
@@ -377,10 +365,6 @@ class RezkaClient:
             return False
 
     def remove_favorite(self, post_id: str, cat_id: str) -> bool:
-        """
-        Удаляет фильм из категории.
-        ИСПРАВЛЕНИЕ: Используем 'add_post', так как на Rezka повторное добавление работает как удаление (toggle).
-        """
         if not self.auth():
             return False
         try:
@@ -397,34 +381,37 @@ class RezkaClient:
 
     def get_category_items_paginated(self, cat_id: str, max_pages: int = 5, sort_by: str = "added") -> List[Dict[str, Any]]:
         """
-        Собирает элементы с поддержкой серверной сортировки.
-        sort_by: 'added' (default), 'year', 'popular'
+        Собирает элементы с поддержкой серверной сортировки HDRezka.
+        Использует параметры URL:
+        - filter=added (По дате добавления)
+        - filter=year (По году выпуска)
+        - filter=popular (Популярные)
         """
         all_items: List[Dict[str, Any]] = []
         seen_ids: set[str] = set()
         if not self.auth():
             return []
             
-        # Формируем параметр сортировки для URL
-        # HDRezka использует параметр 's' (sorting)
-        # s=added (по дате добавления) - дефолт
-        # s=year (по году выпуска)
-        # s=popular (по популярности)
-        sort_param = ""
+        # Формируем правильный параметр фильтрации
+        # Дефолтное значение для резки - это 'filter=added' (или без параметра)
+        filter_param = "filter=added"
+        
         if sort_by == "year":
-            sort_param = "?s=year"
+            filter_param = "filter=year"
         elif sort_by == "popular":
-            sort_param = "?s=popular"
+            filter_param = "filter=popular"
         
         for page in range(1, max_pages + 1):
             try:
+                # Базовый URL категории
                 url_page = f"{self.origin}/favorites/{cat_id}/"
+                
+                # Добавляем пагинацию, если это не первая страница
                 if page > 1:
                     url_page = f"{url_page}page/{page}/"
                 
-                # Добавляем сортировку в конец URL
-                if sort_param:
-                    url_page += sort_param
+                # Добавляем фильтр (параметры запроса идут после ?)
+                url_page = f"{url_page}?{filter_param}"
                 
                 r = self.session.get(url_page)
                 soup = BeautifulSoup(r.text, "html.parser")
@@ -543,14 +530,13 @@ class RezkaClient:
                     if not anchor:
                         continue
                     url = anchor.get("href")
-                    # ИСПРАВЛЕНО: Извлекаем ID из URL, если data-id нет
                     item_id = anchor.get("data-id") or li.get("data-id")
                     if not item_id and url:
                         match = re.search(r'/(\d+)(?:-|\.)', url)
                         if match:
                             item_id = match.group(1)
 
-                    item_id = item_id or url # Fallback
+                    item_id = item_id or url 
 
                     title_span = li.find("span", class_="enty")
                     title = title_span.get_text(strip=True) if title_span else anchor.get_text(strip=True)

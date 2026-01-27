@@ -13,7 +13,7 @@
         var isModalOpen = false;
         var last_item = null;
         var all_items = []; 
-        var current_sort = 'added'; // По умолчанию сортировка по добавлению
+        var current_sort = 'added'; // По умолчанию сортировка по дате добавления
 
         var endpoints = {
             'watching': '/api/watching',
@@ -46,7 +46,7 @@
                         comp.renderList();
                     } else {
                         comp.html.append('<div class="broadcast__text">Список пуст</div>');
-                        comp.renderHeaderOnly(); // Рисуем хедер, чтобы можно было поменять сортировку даже в пустом списке
+                        comp.renderHeaderOnly(); // Рисуем хедер, чтобы можно было поменять сортировку
                     }
                 },
                 error: function(err) {
@@ -60,7 +60,6 @@
         comp.renderHeaderOnly = function() {
              var header = comp.buildHeader();
              comp.html.prepend(header);
-             // Восстанавливаем управление
              comp.start();
         }
 
@@ -68,14 +67,12 @@
         comp.renderList = function() {
             comp.html.empty();
 
-            // ВНЕДРЯЕМ CSS СТИЛИ
             var style = $('<style>' +
                 '.rezka-sort-btn { transition: all 0.2s; border: 2px solid transparent; }' +
                 '.rezka-sort-btn.focus { background-color: #ffffff !important; color: #000000 !important; border-color: #ffffff !important; transform: scale(1.1) !important; box-shadow: 0 0 20px rgba(255,255,255,0.7) !important; z-index: 100; }' +
                 '</style>');
             comp.html.append(style);
 
-            // Контейнер скролла
             scroll_wrapper = $('<div class="rezka-scroll-wrapper"></div>');
             scroll_wrapper.css({
                 'overflow-y': 'hidden',
@@ -162,7 +159,7 @@
             return header;
         }
 
-        // --- МЕНЮ СОРТИРОВКИ (СЕРВЕРНАЯ) ---
+        // --- МЕНЮ СОРТИРОВКИ (ТОЛЬКО 3 ПУНКТА) ---
         comp.showSortMenu = function() {
             var items = [
                 { title: 'По дате добавления', value: 'added', selected: current_sort === 'added' },
