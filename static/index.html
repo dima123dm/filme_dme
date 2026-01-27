@@ -9,20 +9,27 @@
 </head>
 <body>
 
-    <div id="search-ui" class="search-box">
+    <div class="top-bar">
+        <div class="app-logo">HDRezka</div>
+        <div class="sort-btn" onclick="toggleSortMenu()">
+            ⇅ Сортировка
+        </div>
+    </div>
+
+    <div id="search-ui" class="search-box" style="display: none;">
         <input type="search" id="q" placeholder="Поиск сериалов..." oninput="doSearch(this.value)" autocomplete="off">
         <div id="search-results"></div>
     </div>
 
-    <div id="toolbar" class="toolbar" style="display: flex; justify-content: flex-end; padding: 10px 15px;">
-        <select id="sort-select" onchange="changeSort(this.value)" class="sort-select">
-            <option value="added">По дате добавления</option>
-            <option value="year">По году выпуска</option>
-            <option value="popular">Популярные</option>
-        </select>
-    </div>
-
     <div id="grid" class="grid"></div>
+
+    <div id="sort-overlay" onclick="toggleSortMenu()"></div>
+    <div id="sort-menu">
+        <div class="sort-title">Сортировка</div>
+        <div class="sort-item active" onclick="applySort('added')">По дате добавления</div>
+        <div class="sort-item" onclick="applySort('year')">По году выпуска</div>
+        <div class="sort-item" onclick="applySort('popular')">Популярные</div>
+    </div>
 
     <div id="details">
         <button class="back-btn" onclick="closeDetails()">
