@@ -361,39 +361,8 @@ class RezkaClient:
     # Работа с закладками
     # ------------------------
     def get_category_items(self, cat_id: str) -> List[Dict[str, Any]]:
-        if not self.auth():
-            return []
-        try:
-            r = self.session.get(f"{self.origin}/favorites/{cat_id}/")
-            soup = BeautifulSoup(r.text, "html.parser")
-            items: List[Dict[str, Any]] = []
-            for item in soup.find_all(class_="b-content__inline_item"):
-                try:
-                    link = item.find(class_="b-content__inline_item-link").find("a")
-                    img = item.find(class_="b-content__inline_item-cover").find("img")
-                    status = item.find(class_="info")
-                    
-                    full_title = link.get_text(strip=True)
-                    year = ""
-                    match_year = re.search(r'\((\d{4})\)', full_title)
-                    if match_year:
-                        year = match_year.group(1)
-                    
-                    items.append(
-                        {
-                            "id": item.get("data-id"),
-                            "title": full_title,
-                            "url": link.get("href"),
-                            "poster": img.get("src") if img else "",
-                            "status": status.get_text(strip=True) if status else "",
-                            "year": year
-                        }
-                    )
-                except Exception:
-                    continue
-            return items
-        except Exception:
-            return []
+        # Для совместимости, вызывает paginated с 1 страницей
+        return self.get_category_items_paginated(cat_id, max_pages=1)
 
     def add_favorite(self, post_id: str, cat_id: str) -> bool:
         if not self.auth():
@@ -426,16 +395,37 @@ class RezkaClient:
         except Exception:
             return False
 
-    def get_category_items_paginated(self, cat_id: str, max_pages: int = 5) -> List[Dict[str, Any]]:
+    def get_category_items_paginated(self, cat_id: str, max_pages: int = 5, sort_by: str = "added") -> List[Dict[str, Any]]:
+        """
+        Собирает элементы с поддержкой серверной сортировки.
+        sort_by: 'added' (default), 'year', 'popular'
+        """
         all_items: List[Dict[str, Any]] = []
         seen_ids: set[str] = set()
         if not self.auth():
             return []
+            
+        # Формируем параметр сортировки для URL
+        # HDRezka использует параметр 's' (sorting)
+        # s=added (по дате добавления) - дефолт
+        # s=year (по году выпуска)
+        # s=popular (по популярности)
+        sort_param = ""
+        if sort_by == "year":
+            sort_param = "?s=year"
+        elif sort_by == "popular":
+            sort_param = "?s=popular"
+        
         for page in range(1, max_pages + 1):
             try:
                 url_page = f"{self.origin}/favorites/{cat_id}/"
                 if page > 1:
                     url_page = f"{url_page}page/{page}/"
+                
+                # Добавляем сортировку в конец URL
+                if sort_param:
+                    url_page += sort_param
+                
                 r = self.session.get(url_page)
                 soup = BeautifulSoup(r.text, "html.parser")
                 items_page: List[Dict[str, Any]] = []

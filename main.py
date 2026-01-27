@@ -92,20 +92,19 @@ class DeleteRequest(BaseModel):
 # --- ЭНДПОИНТЫ ---
 
 @app.get("/api/watching")
-def get_watching():
-    items = client.get_category_items_paginated(CAT_WATCHING, MAX_PAGES)
-    print(f"[API] 📋 Возвращаем {len(items)} элементов")
-    if items:
-        print(f"[API] 📝 Пример первого элемента: {items[0]}")
+def get_watching(sort: str = "added"):
+    # Передаем параметр сортировки
+    items = client.get_category_items_paginated(CAT_WATCHING, MAX_PAGES, sort_by=sort)
+    print(f"[API] 📋 Возвращаем {len(items)} элементов (sort={sort})")
     return items
 
 @app.get("/api/later")
-def get_later():
-    return client.get_category_items_paginated(CAT_LATER, MAX_PAGES)
+def get_later(sort: str = "added"):
+    return client.get_category_items_paginated(CAT_LATER, MAX_PAGES, sort_by=sort)
 
 @app.get("/api/watched")
-def get_watched():
-    return client.get_category_items_paginated(CAT_WATCHED, MAX_PAGES)
+def get_watched(sort: str = "added"):
+    return client.get_category_items_paginated(CAT_WATCHED, MAX_PAGES, sort_by=sort)
 
 @app.get("/api/details")
 def get_details(url: str):

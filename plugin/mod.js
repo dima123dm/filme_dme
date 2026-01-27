@@ -4,7 +4,7 @@
     var MY_API_URL = 'http://filme.64.188.67.85.sslip.io:8080';
     var TMDB_API_KEY = '4ef0d7355d9ffb5151e987764708ce96';
 
-    console.log('[Rezka] Plugin loading full version...');
+    console.log('[Rezka] Plugin loading full version (Server Sorting & SVG)...');
 
     function RezkaCategory(category) {
         var comp = {};
@@ -13,7 +13,7 @@
         var isModalOpen = false;
         var last_item = null;
         var all_items = []; 
-        var current_sort = 'added_desc'; 
+        var current_sort = 'added'; // По умолчанию сортировка по добавлению
 
         var endpoints = {
             'watching': '/api/watching',
@@ -22,11 +22,20 @@
         };
 
         comp.create = function() {
+            comp.loadData();
+            return comp.html;
+        };
+        
+        comp.loadData = function() {
+            comp.html.empty();
             var loader = $('<div class="broadcast__text">Загрузка...</div>');
             comp.html.append(loader);
 
+            // Добавляем параметр сортировки к запросу
+            var url = MY_API_URL + endpoints[category] + '?sort=' + current_sort;
+
             $.ajax({
-                url: MY_API_URL + endpoints[category],
+                url: url,
                 method: 'GET',
                 dataType: 'json',
                 timeout: 15000,
@@ -37,6 +46,7 @@
                         comp.renderList();
                     } else {
                         comp.html.append('<div class="broadcast__text">Список пуст</div>');
+                        comp.renderHeaderOnly(); // Рисуем хедер, чтобы можно было поменять сортировку даже в пустом списке
                     }
                 },
                 error: function(err) {
@@ -45,28 +55,14 @@
                     comp.html.append('<div class="broadcast__text">Ошибка загрузки данных</div>');
                 }
             });
-            return comp.html;
         };
 
-        // --- ЛОГИКА СОРТИРОВКИ ---
-        comp.sortItems = function(items, type) {
-            var sorted = items.slice();
-            if (type === 'added_desc') return sorted;
-            if (type === 'added_asc') return sorted.reverse();
-            if (type === 'year_desc' || type === 'year_asc') {
-                sorted.sort(function(a, b) {
-                    var ya = parseInt((a.title.match(/\((\d{4})\)/) || [])[1] || 0);
-                    var yb = parseInt((b.title.match(/\((\d{4})\)/) || [])[1] || 0);
-                    return type === 'year_desc' ? yb - ya : ya - yb;
-                });
-                return sorted;
-            }
-            if (type === 'title') {
-                sorted.sort(function(a, b) { return a.title.localeCompare(b.title); });
-                return sorted;
-            }
-            return sorted;
-        };
+        comp.renderHeaderOnly = function() {
+             var header = comp.buildHeader();
+             comp.html.prepend(header);
+             // Восстанавливаем управление
+             comp.start();
+        }
 
         // --- ОТРИСОВКА ИНТЕРФЕЙСА ---
         comp.renderList = function() {
@@ -91,7 +87,45 @@
                 'flex-direction': 'column'
             });
 
-            // 1. Хедер
+            // 1. Хедер (сортировка)
+            var header = comp.buildHeader();
+            scroll_wrapper.append(header);
+
+            // 2. Сетка
+            var grid = $('<div class="rezka-grid"></div>');
+            grid.css({
+                'display': 'grid',
+                'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))',
+                'gap': '15px',
+                'padding': '15px 20px 100px 20px'
+            });
+
+            all_items.forEach(function(item) {
+                grid.append(comp.card(item));
+            });
+
+            scroll_wrapper.append(grid);
+            comp.html.append(scroll_wrapper);
+
+            comp.start();
+
+            // Восстановление фокуса
+            setTimeout(function() {
+                var firstMovie = grid.find('.selector').first();
+                var sortBtn = comp.html.find('.rezka-sort-btn');
+                
+                if (firstMovie.length) {
+                    last_item = firstMovie;
+                    Lampa.Controller.collectionFocus(last_item, comp.html);
+                } else if (sortBtn.length) {
+                    last_item = sortBtn;
+                    Lampa.Controller.collectionFocus(last_item, comp.html);
+                }
+                Lampa.Controller.toggle('rezka');
+            }, 150);
+        };
+        
+        comp.buildHeader = function() {
             var header = $('<div class="rezka-header"></div>');
             header.css({
                 'padding': '15px 20px 5px 20px',
@@ -100,7 +134,12 @@
                 'z-index': '11'
             });
 
-            var sortBtn = $('<div class="selector rezka-sort-btn">⇅ Сортировка</div>');
+            var sortLabel = 'Сортировка';
+            if (current_sort === 'year') sortLabel = 'По году выпуска';
+            if (current_sort === 'popular') sortLabel = 'Популярные';
+            if (current_sort === 'added') sortLabel = 'По дате добавления';
+
+            var sortBtn = $('<div class="selector rezka-sort-btn">⇅ ' + sortLabel + '</div>');
             sortBtn.css({
                 'display': 'inline-block',
                 'padding': '10px 20px',
@@ -120,50 +159,15 @@
             });
 
             header.append(sortBtn);
-            scroll_wrapper.append(header);
+            return header;
+        }
 
-            // 2. Сетка
-            var grid = $('<div class="rezka-grid"></div>');
-            grid.css({
-                'display': 'grid',
-                'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))',
-                'gap': '15px',
-                'padding': '15px 20px 100px 20px'
-            });
-
-            var sortedItems = comp.sortItems(all_items, current_sort);
-
-            sortedItems.forEach(function(item) {
-                grid.append(comp.card(item));
-            });
-
-            scroll_wrapper.append(grid);
-            comp.html.append(scroll_wrapper);
-
-            comp.start();
-
-            // Восстановление фокуса
-            setTimeout(function() {
-                var firstMovie = grid.find('.selector').first();
-                if (firstMovie.length) {
-                    last_item = firstMovie;
-                    Lampa.Controller.collectionFocus(last_item, comp.html);
-                } else {
-                    last_item = sortBtn;
-                    Lampa.Controller.collectionFocus(last_item, comp.html);
-                }
-                Lampa.Controller.toggle('rezka');
-            }, 150);
-        };
-
-        // --- МЕНЮ СОРТИРОВКИ ---
+        // --- МЕНЮ СОРТИРОВКИ (СЕРВЕРНАЯ) ---
         comp.showSortMenu = function() {
             var items = [
-                { title: '📅 Дате добавления (Новые)', value: 'added_desc', selected: current_sort === 'added_desc' },
-                { title: '📅 Дате добавления (Старые)', value: 'added_asc', selected: current_sort === 'added_asc' },
-                { title: '🎬 Году выпуска (Новые)', value: 'year_desc', selected: current_sort === 'year_desc' },
-                { title: '🎬 Году выпуска (Старые)', value: 'year_asc', selected: current_sort === 'year_asc' },
-                { title: '🔤 По названию (А-Я)', value: 'title', selected: current_sort === 'title' }
+                { title: 'По дате добавления', value: 'added', selected: current_sort === 'added' },
+                { title: 'По году выпуска', value: 'year', selected: current_sort === 'year' },
+                { title: 'Популярные', value: 'popular', selected: current_sort === 'popular' }
             ];
 
             items.forEach(function(i) {
@@ -174,9 +178,14 @@
                 title: 'Сортировка',
                 items: items,
                 onSelect: function(a) {
-                    current_sort = a.value;
-                    isModalOpen = false;
-                    comp.renderList();
+                    if (current_sort !== a.value) {
+                        current_sort = a.value;
+                        isModalOpen = false;
+                        comp.loadData(); // Перезагружаем данные с сервера
+                    } else {
+                        isModalOpen = false;
+                        Lampa.Controller.toggle('rezka');
+                    }
                 },
                 onBack: function() {
                     isModalOpen = false;
@@ -189,7 +198,7 @@
         comp.card = function(item) {
             var rawTitle = item.title || '';
             var yearMatch = rawTitle.match(/\((\d{4})\)/);
-            var year = yearMatch ? yearMatch[1] : '';
+            var year = yearMatch ? yearMatch[1] : (item.year || '');
             var titleNoYear = rawTitle.replace(/\s*\(\d{4}\)/, '').trim();
             var titleRu = titleNoYear.split('/')[0].trim();
             var titleEn = (titleNoYear.split('/')[1] || '').trim();
@@ -483,7 +492,7 @@
                     Lampa.Noty.show(res.success ? 'Сохранено' : 'Ошибка'); 
                     isModalOpen = false; 
                     Lampa.Controller.toggle('rezka');
-                    if (res.success) comp.reload(); 
+                    if (res.success) comp.loadData(); // Перезагружаем
                 },
                 error: function() { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка сети'); isModalOpen = false; Lampa.Controller.toggle('rezka'); }
             });
@@ -499,7 +508,7 @@
                     Lampa.Noty.show(res.success ? 'Сезон отмечен' : 'Ошибка'); 
                     isModalOpen = false; 
                     Lampa.Controller.toggle('rezka');
-                    if (res.success) comp.reload(); 
+                    if (res.success) comp.loadData(); 
                 },
                 error: function() { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка сети'); isModalOpen = false; Lampa.Controller.toggle('rezka'); }
             });
@@ -507,19 +516,14 @@
 
         // --- ДЕЙСТВИЯ (ИСПРАВЛЕНА 422 ОШИБКА) ---
         comp.action = function(action, item) {
-            // Ищем ID в ссылке (берем только цифры)
             var match = item.url.match(/\/(\d+)/);
             var postId = match ? match[1] : null;
             
             if (!postId) { Lampa.Noty.show('Не найден ID фильма'); return; }
             
-            // ЛОГИРУЕМ ДАННЫЕ ПЕРЕД ОТПРАВКОЙ (для отладки)
-            console.log('[Rezka] Action:', action, 'ID:', postId);
-
             Lampa.Loading.start(function() {});
             
             var endpoint = action === 'delete' ? '/api/delete' : '/api/move';
-            // ВАЖНО: Отправляем ID как СТРОКУ (убрал parseInt), так как старая версия работала со строками
             var data = action === 'delete' 
                 ? { post_id: postId, category: category } 
                 : { post_id: postId, from_category: category, to_category: action.replace('move_', '') };
@@ -531,17 +535,12 @@
                 data: JSON.stringify(data),
                 success: function(res) { 
                     Lampa.Loading.stop(); 
-                    // Если сервер вернул 200 OK, считаем что всё успешно, даже если success=false
                     Lampa.Noty.show('Выполнено');
                     Lampa.Controller.toggle('rezka');
-                    
-                    // Обновляем список с задержкой, чтобы сервер успел обработать
-                    setTimeout(function() { comp.reload(); }, 500);
+                    setTimeout(function() { comp.loadData(); }, 500);
                 },
                 error: function(err) { 
                     Lampa.Loading.stop(); 
-                    // Если 422 - это ошибка формата, но мы уже перепробовали варианты. 
-                    // Возможно сервер все равно выполнил действие.
                     console.error('[Rezka] Action Error:', err);
                     Lampa.Noty.show('Ошибка сети: ' + err.status); 
                     Lampa.Controller.toggle('rezka'); 
@@ -617,7 +616,17 @@
         setTimeout(function() {
             $('[data-action^="rezka_"]').remove();
             var menu = $('.menu .menu__list').eq(0);
-            [{a:'rezka_watching',i:'▶',t:'Смотрю'}, {a:'rezka_later',i:'⏳',t:'Позже'}, {a:'rezka_watched',i:'✅',t:'Архив'}].forEach(function(item) {
+            
+            // НОВЫЕ SVG ИКОНКИ ДЛЯ МЕНЮ
+            var icon_watching = '<svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
+            var icon_later    = '<svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
+            var icon_watched  = '<svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
+
+            [
+                {a:'rezka_watching', i: icon_watching, t:'Смотрю'}, 
+                {a:'rezka_later',    i: icon_later,    t:'Позже'}, 
+                {a:'rezka_watched',  i: icon_watched,  t:'Архив'}
+            ].forEach(function(item) {
                 var mi = $('<li class="menu__item selector" data-action="' + item.a + '"><div class="menu__ico">' + item.i + '</div><div class="menu__text">' + item.t + '</div></li>');
                 mi.on('hover:enter', function() { Lampa.Activity.push({ component: item.a, page: 1 }); });
                 menu.append(mi);
