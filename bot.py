@@ -78,25 +78,39 @@ async def cmd_start(message: types.Message):
 # --- СПИСОК СЕРИАЛОВ (С ПАГИНАЦИЕЙ) ---
 @dp.callback_query(F.data.startswith("my_list_"))
 async def show_watchlist(callback: types.CallbackQuery):
-    page = int(callback.data.split("_")[2])
+    try:
+        page = int(callback.data.split("_")[2])
+    except:
+        page = 1
     
-    await callback.answer("Загружаю список...")
+    # Не отвечаем сразу answer, чтобы не было "часиков", если быстро, 
+    # но лучше ответить, чтобы телеграм не ругался
+    # await callback.answer("Загружаю список...") 
     
     try:
         # Получаем список "Смотрю"
         items = await asyncio.to_thread(client.get_category_items, CAT_WATCHING)
         
         if not items:
-            await callback.message.answer("Список 'Смотрю' пуст или ошибка доступа.")
+            await callback.answer("Список пуст", show_alert=True)
             return
 
         # Обновляем стейт URL-ами, чтобы потом работали настройки
         state = load_state()
         changed = False
+        
         for item in items:
             iid = str(item["id"])
+            
+            # --- ИСПРАВЛЕНИЕ ОШИБКИ: Проверка формата данных ---
+            if iid in state and not isinstance(state[iid], dict):
+                # Если в базе лежит старый формат (строка), сбрасываем его
+                state[iid] = {}
+            # ----------------------------------------------------
+
             if iid not in state:
                 state[iid] = {}
+            
             # Всегда обновляем актуальные данные
             if state[iid].get("url") != item["url"]:
                 state[iid]["url"] = item["url"]
@@ -109,6 +123,10 @@ async def show_watchlist(callback: types.CallbackQuery):
         # Пагинация (по 10 штук)
         items_per_page = 10
         total_pages = math.ceil(len(items) / items_per_page)
+        
+        if page > total_pages: page = total_pages
+        if page < 1: page = 1
+        
         start = (page - 1) * items_per_page
         end = start + items_per_page
         current_items = items[start:end]
@@ -137,10 +155,13 @@ async def show_watchlist(callback: types.CallbackQuery):
             await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
         else:
             await callback.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+        
+        await callback.answer()
             
     except Exception as e:
         logger.error(f"Error watchlist: {e}")
-        await callback.message.answer("Ошибка загрузки списка.")
+        await callback.message.answer(f"Ошибка загрузки списка: {e}")
+        await callback.answer()
 
 # --- МЕНЮ НАСТРОЕК ОЗВУЧЕК (ОДИН СЕРИАЛ) ---
 @dp.callback_query(F.data.startswith("sett_"))
@@ -148,12 +169,18 @@ async def open_settings(callback: types.CallbackQuery):
     post_id = callback.data.split("_")[1]
     
     state = load_state()
+    
+    # --- ПРОВЕРКА НА БИТЫЙ СТЕЙТ ---
+    if post_id in state and not isinstance(state[post_id], dict):
+        state[post_id] = {}
+    # -------------------------------
+
     series_data = state.get(post_id, {})
     url = series_data.get("url")
     title = series_data.get("title", "Сериал")
     
     if not url:
-        await callback.answer("Ошибка: URL не найден. Обновите список сериалов.", show_alert=True)
+        await callback.answer("Ошибка: URL не найден. Обновите список.", show_alert=True)
         return
 
     await callback.answer("Загружаю озвучки...")
@@ -164,14 +191,15 @@ async def open_settings(callback: types.CallbackQuery):
         translators = details.get("translators", [])
         
         if not translators:
-            await callback.message.edit_text(f"🎬 <b>{title}</b>\n❌ Для этого сериала озвучки не найдены (или он не многоголосый).", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад к списку", callback_data="my_list_1")]]), parse_mode="HTML")
+            await callback.message.edit_text(
+                f"🎬 <b>{title}</b>\n❌ Для этого сериала озвучки не найдены (или он не многоголосый).", 
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад к списку", callback_data="my_list_1")]]), 
+                parse_mode="HTML"
+            )
             return
 
         kb = []
         user_prefs = series_data.get("prefs", {}) 
-        
-        # Если настройки пустые, пытаемся найти "активную" озвучку (которая открывается по ссылке)
-        # Но для надежности просто показываем всё выключенным, если пользователь не включал
         
         for t in translators:
             t_id = str(t["id"])
@@ -205,6 +233,11 @@ async def toggle_voice(callback: types.CallbackQuery):
     _, post_id, t_id = callback.data.split("_")
     
     state = load_state()
+    
+    # --- ИСПРАВЛЕНИЕ БИТОГО СТЕЙТА ---
+    if post_id in state and not isinstance(state[post_id], dict):
+        state[post_id] = {}
+    
     if post_id not in state: state[post_id] = {}
     if "prefs" not in state[post_id]: state[post_id]["prefs"] = {}
 
@@ -224,10 +257,12 @@ async def toggle_voice(callback: types.CallbackQuery):
         for btn in row:
             if btn.callback_data == callback.data:
                 text = btn.text
+                # Убираем старый значок, если он был
+                clean_text = text.replace("✅ ", "").replace("❌ ", "")
                 if new_val:
-                    new_text = "✅" + text[1:] # Меняем крестик на галочку
+                    new_text = f"✅ {clean_text}" 
                 else:
-                    new_text = "❌" + text[1:]
+                    new_text = f"❌ {clean_text}"
                 new_row.append(InlineKeyboardButton(text=new_text, callback_data=btn.callback_data))
             else:
                 new_row.append(btn)
@@ -267,6 +302,10 @@ async def check_updates_task():
                     
                     if not url or not item_id: continue
 
+                    # --- МИГРАЦИЯ ДАННЫХ ЕСЛИ НУЖНО ---
+                    if item_id in state and not isinstance(state[item_id], dict):
+                        state[item_id] = {}
+
                     if item_id not in state:
                         state[item_id] = {"title": title, "url": url, "progress": {}, "prefs": {}}
                     
@@ -297,6 +336,7 @@ async def check_updates_task():
                             try: s_int = int(s_num)
                             except: continue
                             
+                            if not eps: continue
                             last_ep_obj = eps[-1]
                             try: e_int = int(last_ep_obj["episode"])
                             except: continue
@@ -313,6 +353,11 @@ async def check_updates_task():
                         
                         # Проверяем прогресс
                         if "progress" not in state[item_id]: state[item_id]["progress"] = {}
+                        
+                        # Дополнительная защита, если в progress мусор
+                        if not isinstance(state[item_id]["progress"], dict):
+                             state[item_id]["progress"] = {}
+
                         current_progress = state[item_id]["progress"].get(t_id)
                         
                         if current_progress and current_progress != last_tag:
@@ -335,7 +380,7 @@ async def check_updates_task():
                             except Exception as e:
                                 logger.error(f"Send error: {e}")
                         
-                        # Сохраняем (даже если первый раз, чтобы не спамить старыми сериями)
+                        # Сохраняем
                         state[item_id]["progress"][t_id] = last_tag
 
                 except Exception as ex:
