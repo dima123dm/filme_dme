@@ -4,7 +4,7 @@
     var MY_API_URL = '__API_URL__';
     var TMDB_API_KEY = '__TMDB_KEY__';
 
-    console.log('[Rezka] Plugin loading (Final Scroll & Focus Fix)...');
+    console.log('[Rezka] Plugin loading (Final Fixes)...');
 
     function RezkaCategory(category) {
         var comp = {};
@@ -13,6 +13,7 @@
         var last_item = null;
         var all_items = []; 
         var current_sort = 'added'; 
+        var isModalOpen = false; // <-- ИСПРАВЛЕНО: Добавлена пропущенная переменная
 
         var endpoints = {
             'watching': '/api/watching',
@@ -65,29 +66,20 @@
         comp.renderList = function() {
             comp.html.empty();
 
-            // СТИЛИ CSS
             var style = $('<style>' +
-                /* Скрываем полосу прокрутки, но оставляем функционал */
                 '.rezka-scroll-wrapper::-webkit-scrollbar { width: 0px; background: transparent; }' +
                 '.rezka-scroll-wrapper { -ms-overflow-style: none; scrollbar-width: none; }' +
-                
-                /* Стили кнопки сортировки */
                 '.rezka-sort-btn { transition: all 0.2s; border: 2px solid transparent; }' +
                 '.rezka-sort-btn.focus { background-color: #ffffff !important; color: #000000 !important; border-color: #ffffff !important; transform: scale(1.1); box-shadow: 0 0 20px rgba(255,255,255,0.7); z-index: 100; }' +
-                
-                /* Стили карточки и фокуса */
                 '.rezka-card { transition: transform 0.2s, box-shadow 0.2s, border 0.2s; border: 2px solid transparent; }' +
                 '.rezka-card.focus { transform: scale(1.1) !important; border: 2px solid #fff !important; box-shadow: 0 10px 30px rgba(0,0,0,0.8) !important; z-index: 50 !important; position: relative; }' +
-                
-                /* АДАПТИВНОСТЬ: На ПК (ширина > 1024px) карточки шире (250px), будет ~6 в ряд */
                 '@media screen and (min-width: 1024px) { .rezka-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)) !important; } }' +
                 '</style>');
             comp.html.append(style);
 
-            // ОБЕРТКА СКРОЛЛА
             scroll_wrapper = $('<div class="rezka-scroll-wrapper"></div>');
             scroll_wrapper.css({
-                'overflow-y': 'auto', // Разрешаем нативный скролл (для мышки)
+                'overflow-y': 'auto',
                 'overflow-x': 'hidden',
                 'height': '100%',
                 'width': '100%',
@@ -97,15 +89,12 @@
                 'outline': 'none'
             });
 
-            // 1. Хедер
             var header = comp.buildHeader();
             scroll_wrapper.append(header);
 
-            // 2. Сетка
             var grid = $('<div class="rezka-grid"></div>');
             grid.css({
                 'display': 'grid',
-                // На ТВ/Телефонах карточки по 140px (как было)
                 'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))',
                 'gap': '15px', 
                 'padding': '15px 20px 100px 20px'
@@ -120,7 +109,6 @@
 
             comp.start();
 
-            // Первичная установка фокуса
             setTimeout(function() {
                 var firstMovie = grid.find('.selector').first();
                 var sortBtn = comp.html.find('.rezka-sort-btn');
@@ -283,13 +271,10 @@
 
             card.data('item', item);
 
-            // --- ВАША ЛОГИКА ФОКУСА И СКРОЛЛА ---
             card.on('hover:focus', function() {
                 last_item = $(this);
-                // Добавляем класс .focus для белой рамки и увеличения
                 $(this).addClass('focus');
 
-                // Математика скролла (как вы просили)
                 if (scroll_wrapper) {
                     var cardTop = $(this).position().top;
                     var containerHeight = scroll_wrapper.height();
@@ -311,6 +296,7 @@
 
             card.on('hover:enter', function(e) {
                 if(e) e.preventDefault();
+                // ТЕПЕРЬ ЭТА СТРОКА НЕ БУДЕТ ВЫДАВАТЬ ОШИБКУ
                 if(isModalOpen) return;
                 comp.search(titleRuClean, titleEn, year, mediaType);
             });
@@ -437,7 +423,6 @@
                     } else if (sel.value === 'manual_search') {
                         var ruName = item.title.replace(/\s*\(\d{4}\)/, '').split('/')[0].trim();
                         comp.search(ruName);
-                        // Для ручного поиска нужно вернуть контроллер
                         Lampa.Controller.toggle('rezka');
                     } else {
                         comp.action(sel.value, item);
@@ -573,14 +558,10 @@
         comp.start = function() {
             Lampa.Controller.add('rezka', {
                 toggle: function() {
-                    // ЯВНО УКАЗЫВАЕМ КОЛЛЕКЦИЮ ДЛЯ ФОКУСА
                     Lampa.Controller.collectionSet(comp.html);
-                    
-                    // ЕСЛИ last_item ПОТЕРЯЛСЯ (БАГ С ЗАВИСАНИЕМ) - ИЩЕМ НОВЫЙ
                     if (!last_item || !$(last_item).parent().length || !$(last_item).is(':visible')) {
                         last_item = comp.html.find('.selector').first();
                     }
-                    
                     Lampa.Controller.collectionFocus(last_item, comp.html);
                 },
                 up: function() {
@@ -590,17 +571,18 @@
                         return;
                     }
                     
-                    // 2. ИСПРАВЛЕНИЕ: Если мы в сетке, всегда пытаемся попасть на кнопку сортировки,
-                    // игнорируя стандартную геометрию (Navigator.canmove), которая багует на левых элементах.
-                    var sortBtn = comp.html.find('.rezka-sort-btn');
-                    
-                    if (sortBtn.length) {
-                         // Принудительно ставим фокус на кнопку
-                         Navigator.focus(sortBtn);
+                    // 2. ИСПРАВЛЕНИЕ НАВИГАЦИИ СЛЕВА
+                    // Если можно идти вверх (например, со второго ряда), идем
+                    if (Navigator.canmove('up')) {
+                        Navigator.move('up');
                     } else {
-                         // Если кнопки вдруг нет, то стандартное поведение
-                         if (Navigator.canmove('up')) Navigator.move('up');
-                         else Lampa.Controller.toggle('head');
+                        // Если вверх идти нельзя (например, 1-й ряд слева), прыгаем на кнопку
+                        var sortBtn = comp.html.find('.rezka-sort-btn');
+                        if (sortBtn.length) {
+                             Navigator.focus(sortBtn);
+                        } else {
+                             Lampa.Controller.toggle('head');
+                        }
                     }
                 },
                 down: function() { if(Navigator.canmove('down')) Navigator.move('down'); },
@@ -614,16 +596,14 @@
 
         // --- ИСПРАВЛЕНИЕ ЗАВИСАНИЯ ПРИ ВОЗВРАТЕ ---
         comp.onResume = function() {
-            // При возврате всегда дергаем контроллер и обновляем фокус принудительно
             if (scroll_wrapper && scroll_wrapper.length) {
-                // Увеличили задержку до 150мс, чтобы анимация меню успела пройти
+                // Ждем чуть дольше, чтобы меню полностью закрылось
                 setTimeout(function() {
                     Lampa.Controller.toggle('rezka');
-                    // ПРИНУДИТЕЛЬНО возвращаем фокус на последний элемент
                     if(last_item) {
                         Lampa.Controller.collectionFocus(last_item, comp.html);
                     }
-                }, 150);
+                }, 200);
             }
         };
 
