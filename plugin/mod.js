@@ -923,7 +923,7 @@
                                     Lampa.Loading.stop();
                                     Lampa.Noty.show('Готово');
                                     
-                                    // Логика обновления иконок (оставь её)
+                                    // Логика обновления иконок
                                     if (a.value === 'delete') {
                                         libraryState.watching.delete(rid);
                                         libraryState.later.delete(rid);
@@ -940,12 +940,18 @@
                                         myBtn.find('span').text('В папке');
                                     }
                                     
-                                    // ТУТ БОЛЬШЕ НЕТ НИКАКИХ TOGGLE или CONTROLLER
+                                    // Возвращаем фокус на кнопку после закрытия меню
+                                    setTimeout(function() {
+                                        Lampa.Controller.toggle('content');
+                                    }, 100);
                                 },
                                 error: function() {
                                     Lampa.Loading.stop();
                                     Lampa.Noty.show('Ошибка');
-                                    // ТУТ ТОЖЕ УДАЛИ TOGGLE
+                                    // Возвращаем управление и при ошибке
+                                    setTimeout(function() {
+                                        Lampa.Controller.toggle('content');
+                                    }, 100);
                                 }
                             });
                             }
