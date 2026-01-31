@@ -1,21 +1,19 @@
 (function() {
     'use strict';
 
-    // Python заменит эти значения на данные из .env при загрузке
     var MY_API_URL = '__API_URL__';
     var TMDB_API_KEY = '__TMDB_KEY__';
 
-    console.log('[Rezka] Plugin loading full version (Fixed Navigation & PC Support)...');
+    console.log('[Rezka] Plugin loading (Restored Logic + PC Support)...');
 
     function RezkaCategory(category) {
         var comp = {};
         comp.html = $('<div class="category-items"></div>');
         var scroll_wrapper = null;
-        var scroll = null;
         var isModalOpen = false;
         var last_item = null;
         var all_items = []; 
-        var current_sort = 'added'; // По умолчанию сортировка по дате добавления
+        var current_sort = 'added'; 
 
         var endpoints = {
             'watching': '/api/watching',
@@ -68,38 +66,30 @@
         comp.renderList = function() {
             comp.html.empty();
 
-            // ВНЕДРЯЕМ CSS СТИЛИ (ФОКУС + АДАПТИВНОСТЬ)
+            // СТИЛИ: 
+            // 1. Скрываем скроллбар (для красоты на ТВ), но оставляем возможность скроллить.
+            // 2. Добавляем класс .focus для подсветки активного элемента.
+            // 3. Адаптивность для ПК (постеры крупнее).
             var style = $('<style>' +
+                '.rezka-scroll-wrapper::-webkit-scrollbar { width: 0px; background: transparent; }' +
+                '.rezka-scroll-wrapper { -ms-overflow-style: none; scrollbar-width: none; }' +
                 '.rezka-sort-btn { transition: all 0.2s; border: 2px solid transparent; }' +
                 '.rezka-sort-btn.focus { background-color: #ffffff !important; color: #000000 !important; border-color: #ffffff !important; transform: scale(1.1); box-shadow: 0 0 20px rgba(255,255,255,0.7); z-index: 100; }' +
-                /* Стили фокуса для карточки */
-                '.rezka-card { transition: transform 0.2s, box-shadow 0.2s; border: 2px solid transparent; }' +
-                '.rezka-card.focus { transform: scale(1.05); border: 2px solid #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.8); z-index: 5; }' +
-                /* Адаптивность сетки: на ТВ/Телефонах поменьше, на ПК побольше */
+                '.rezka-card { transition: transform 0.2s, box-shadow 0.2s, border 0.2s; border: 2px solid transparent; }' +
+                '.rezka-card.focus { transform: scale(1.1) !important; border: 2px solid #fff !important; box-shadow: 0 10px 30px rgba(0,0,0,0.8) !important; z-index: 100 !important; }' +
                 '@media screen and (min-width: 1024px) { .rezka-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)) !important; } }' +
                 '</style>');
             comp.html.append(style);
 
-            // Инициализация скролла Lampa
-            scroll = new Lampa.Scroll({
-                horizontal: false,
-                step: 250,
-                // Включаем колесико мыши для ПК
-                mouse_wheel: true 
-            });
-            
-            // Дополнительная активация колеса (на всякий случай, в разных версиях Lampa по-разному)
-            if(scroll.wheel) scroll.wheel(true);
-
-            // Обертка
             scroll_wrapper = $('<div class="rezka-scroll-wrapper"></div>');
-            
-            // Важно для корректной работы скролла:
             scroll_wrapper.css({
+                'overflow-y': 'auto', // ВКЛЮЧАЕТ МЫШКУ НА ПК
+                'overflow-x': 'hidden',
+                'height': '100%',
+                'width': '100%',
                 'position': 'relative',
                 'display': 'flex',
-                'flex-direction': 'column',
-                'min-height': '100%'
+                'flex-direction': 'column'
             });
 
             // 1. Хедер (сортировка)
@@ -110,9 +100,9 @@
             var grid = $('<div class="rezka-grid"></div>');
             grid.css({
                 'display': 'grid',
-                'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))', // Дефолт для ТВ
-                'gap': '15px',
-                'padding': '15px 20px 100px 20px'
+                'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))',
+                'gap': '20px', // Чуть больше отступ, чтобы при увеличении (scale) не перекрывали друг друга
+                'padding': '20px 25px 100px 25px'
             });
 
             all_items.forEach(function(item) {
@@ -120,10 +110,7 @@
             });
 
             scroll_wrapper.append(grid);
-            
-            // ВАЖНО: Добавляем обертку в скролл, а скролл в html
-            scroll.append(scroll_wrapper);
-            comp.html.append(scroll.render());
+            comp.html.append(scroll_wrapper);
 
             comp.start();
 
@@ -138,8 +125,9 @@
                     last_item = sortBtn;
                 }
                 
-                // Принудительно ставим фокус
-                if(last_item) Lampa.Controller.collectionFocus(last_item, comp.html);
+                if (last_item) {
+                    Lampa.Controller.collectionFocus(last_item, scroll_wrapper);
+                }
                 Lampa.Controller.toggle('rezka');
             }, 150);
         };
@@ -175,6 +163,11 @@
             
             sortBtn.on('hover:focus', function() {
                 last_item = sortBtn;
+                $(this).addClass('focus');
+            });
+
+            sortBtn.on('hover:blur', function() {
+                $(this).removeClass('focus');
             });
 
             header.append(sortBtn);
@@ -287,17 +280,33 @@
 
             card.data('item', item);
 
-            // ОБРАБОТКА ФОКУСА (ГЛАВНОЕ ДЛЯ ТВ)
+            // --- ВОЗВРАЩЕННАЯ И УЛУЧШЕННАЯ ЛОГИКА ФОКУСА ---
             card.on('hover:focus', function() {
                 last_item = $(this);
-                // Добавляем класс для визуальной подсветки
-                $(this).addClass('focus');
                 
-                // ВАЖНО: Обновляем скролл, чтобы элемент был виден
-                if (scroll) scroll.update($(this));
+                // Добавляем класс для подсветки (через CSS)
+                $(this).addClass('focus');
+
+                // РУЧНОЙ СКРОЛЛ (Как было раньше, для ТВ)
+                if (scroll_wrapper) {
+                    var cardTop = $(this).position().top;
+                    var containerHeight = scroll_wrapper.height();
+                    var scrollTop = scroll_wrapper.scrollTop();
+                    var headerHeight = 60; 
+
+                    // Если элемент уходит вниз -> скроллим вниз
+                    if (cardTop > containerHeight - 180) {
+                        scroll_wrapper.stop().animate({ scrollTop: scrollTop + 250 }, 200);
+                    }
+                    // Если элемент уходит вверх (под хедер) -> скроллим вверх
+                    if (cardTop < headerHeight + 20) {
+                        scroll_wrapper.stop().animate({ scrollTop: scrollTop - 250 }, 200);
+                    }
+                }
             });
 
             card.on('hover:blur', function() {
+                // Убираем подсветку
                 $(this).removeClass('focus');
             });
 
@@ -565,14 +574,15 @@
         comp.start = function() {
             Lampa.Controller.add('rezka', {
                 toggle: function() {
-                    Lampa.Controller.collectionSet(comp.html);
+                    // Привязываем контроллер к обертке, а не к comp.html, чтобы работали события
+                    Lampa.Controller.collectionSet(scroll_wrapper);
                     
                     // Если last_item пуст или потерян, берем первый элемент
                     if (!last_item || !$(last_item).parent().length) {
-                        last_item = comp.html.find('.selector').first();
+                        last_item = scroll_wrapper.find('.selector').first();
                     }
                     
-                    Lampa.Controller.collectionFocus(last_item, comp.html);
+                    Lampa.Controller.collectionFocus(last_item, scroll_wrapper);
                 },
                 up: function() {
                     // Если мы уже на кнопке сортировки -> открываем Head
@@ -612,14 +622,16 @@
 
         comp.onResume = function() {
             // При возврате (например из плеера или меню) восстанавливаем управление
-            Lampa.Controller.toggle('rezka');
+            // Важно: проверяем, создан ли scroll_wrapper, иначе можем словить ошибку
+            if(scroll_wrapper && scroll_wrapper.length) {
+                Lampa.Controller.toggle('rezka');
+            }
         };
 
         comp.pause = function() {};
 
         comp.destroy = function() {
             Lampa.Controller.clear();
-            if(scroll) scroll.destroy();
             comp.html.remove();
         };
 
