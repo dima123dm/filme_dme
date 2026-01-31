@@ -1,19 +1,17 @@
 (function() {
     'use strict';
-    
-    // Python заменит __API_URL__ на реальный адрес из .env
-    var MY_API_URL = '__API_URL__'; 
-    var TMDB_API_KEY = '__TMDB_KEY__';
-    
-    console.log('[Rezka] Plugin loading...');
-    // ... остальной код без изменений ...
 
-    console.log('[Rezka] Plugin loading full version (Server Sorting & SVG)...');
+    // Python заменит эти значения на данные из .env при загрузке
+    var MY_API_URL = '__API_URL__';
+    var TMDB_API_KEY = '__TMDB_KEY__';
+
+    console.log('[Rezka] Plugin loading full version (Fixed Navigation & PC Support)...');
 
     function RezkaCategory(category) {
         var comp = {};
         comp.html = $('<div class="category-items"></div>');
         var scroll_wrapper = null;
+        var scroll = null;
         var isModalOpen = false;
         var last_item = null;
         var all_items = []; 
@@ -71,21 +69,34 @@
         comp.renderList = function() {
             comp.html.empty();
 
+            // ВНЕДРЯЕМ CSS СТИЛИ (ФОКУС + АДАПТИВНОСТЬ)
             var style = $('<style>' +
                 '.rezka-sort-btn { transition: all 0.2s; border: 2px solid transparent; }' +
-                '.rezka-sort-btn.focus { background-color: #ffffff !important; color: #000000 !important; border-color: #ffffff !important; transform: scale(1.1) !important; box-shadow: 0 0 20px rgba(255,255,255,0.7) !important; z-index: 100; }' +
+                '.rezka-sort-btn.focus { background-color: #ffffff !important; color: #000000 !important; border-color: #ffffff !important; transform: scale(1.1); box-shadow: 0 0 20px rgba(255,255,255,0.7); z-index: 100; }' +
+                /* Стили фокуса для карточки */
+                '.rezka-card { transition: transform 0.2s, box-shadow 0.2s; border: 2px solid transparent; }' +
+                '.rezka-card.focus { transform: scale(1.05); border: 2px solid #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.8); z-index: 5; }' +
+                /* Адаптивность сетки: на ТВ/Телефонах поменьше, на ПК побольше */
+                '@media screen and (min-width: 1024px) { .rezka-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)) !important; } }' +
                 '</style>');
             comp.html.append(style);
 
+            // Инициализация скролла Lampa
+            scroll = new Lampa.Scroll({
+                horizontal: false,
+                step: 250
+            });
+            
+            // Включаем поддержку колесика мыши для ПК
+            scroll.wheel(true);
+
+            // Обертка
             scroll_wrapper = $('<div class="rezka-scroll-wrapper"></div>');
             scroll_wrapper.css({
-                'overflow-y': 'hidden',
-                'overflow-x': 'hidden',
-                'height': '100%',
-                'width': '100%',
                 'position': 'relative',
                 'display': 'flex',
-                'flex-direction': 'column'
+                'flex-direction': 'column',
+                'min-height': '100%'
             });
 
             // 1. Хедер (сортировка)
@@ -96,7 +107,7 @@
             var grid = $('<div class="rezka-grid"></div>');
             grid.css({
                 'display': 'grid',
-                'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))',
+                'grid-template-columns': 'repeat(auto-fill, minmax(140px, 1fr))', // Дефолт для ТВ
                 'gap': '15px',
                 'padding': '15px 20px 100px 20px'
             });
@@ -106,7 +117,10 @@
             });
 
             scroll_wrapper.append(grid);
-            comp.html.append(scroll_wrapper);
+            
+            // Добавляем контент в скролл компонент
+            scroll.append(scroll_wrapper);
+            comp.html.append(scroll.render());
 
             comp.start();
 
@@ -117,11 +131,11 @@
                 
                 if (firstMovie.length) {
                     last_item = firstMovie;
-                    Lampa.Controller.collectionFocus(last_item, comp.html);
                 } else if (sortBtn.length) {
                     last_item = sortBtn;
-                    Lampa.Controller.collectionFocus(last_item, comp.html);
                 }
+                
+                // Принудительно ставим фокус
                 Lampa.Controller.toggle('rezka');
             }, 150);
         };
@@ -163,7 +177,7 @@
             return header;
         }
 
-        // --- МЕНЮ СОРТИРОВКИ (ТОЛЬКО 3 ПУНКТА) ---
+        // --- МЕНЮ СОРТИРОВКИ ---
         comp.showSortMenu = function() {
             var items = [
                 { title: 'По дате добавления', value: 'added', selected: current_sort === 'added' },
@@ -182,7 +196,7 @@
                     if (current_sort !== a.value) {
                         current_sort = a.value;
                         isModalOpen = false;
-                        comp.loadData(); // Перезагружаем данные с сервера
+                        comp.loadData();
                     } else {
                         isModalOpen = false;
                         Lampa.Controller.toggle('rezka');
@@ -215,7 +229,6 @@
                 'cursor': 'pointer',
                 'border-radius': '8px',
                 'overflow': 'hidden',
-                'transition': 'transform 0.2s',
                 'background-color': '#202020'
             });
 
@@ -272,27 +285,8 @@
 
             card.on('hover:focus', function() {
                 last_item = $(this);
-                $('.rezka-card').css({'transform': 'scale(1)', 'box-shadow': 'none', 'z-index': '1'});
-                $(this).css({'transform': 'scale(1.05)', 'box-shadow': '0 8px 20px rgba(0,0,0,0.5)', 'z-index': '10'});
-
-                // Ручной скролл
-                if (scroll_wrapper) {
-                    var cardTop = $(this).position().top;
-                    var containerHeight = scroll_wrapper.height();
-                    var scrollTop = scroll_wrapper.scrollTop();
-                    var headerHeight = 60; 
-
-                    if (cardTop > containerHeight - 180) {
-                        scroll_wrapper.stop().animate({ scrollTop: scrollTop + 250 }, 200);
-                    }
-                    if (cardTop < headerHeight + 20) {
-                        scroll_wrapper.stop().animate({ scrollTop: scrollTop - 250 }, 200);
-                    }
-                }
-            });
-
-            card.on('hover:blur', function() {
-                $(this).css({'transform': 'scale(1)', 'box-shadow': 'none', 'z-index': '1'});
+                // Обновляем скролл при фокусе, чтобы элемент был виден
+                if (scroll) scroll.update($(this));
             });
 
             card.on('hover:enter', function(e) {
@@ -493,7 +487,7 @@
                     Lampa.Noty.show(res.success ? 'Сохранено' : 'Ошибка'); 
                     isModalOpen = false; 
                     Lampa.Controller.toggle('rezka');
-                    if (res.success) comp.loadData(); // Перезагружаем
+                    if (res.success) comp.loadData();
                 },
                 error: function() { Lampa.Loading.stop(); Lampa.Noty.show('Ошибка сети'); isModalOpen = false; Lampa.Controller.toggle('rezka'); }
             });
@@ -515,7 +509,6 @@
             });
         };
 
-        // --- ДЕЙСТВИЯ (ИСПРАВЛЕНА 422 ОШИБКА) ---
         comp.action = function(action, item) {
             var match = item.url.match(/\/(\d+)/);
             var postId = match ? match[1] : null;
@@ -557,18 +550,28 @@
         comp.start = function() {
             Lampa.Controller.add('rezka', {
                 toggle: function() {
+                    // ВАЖНО: Восстанавливаем коллекцию и фокус при возврате из меню
                     Lampa.Controller.collectionSet(comp.html);
+                    
+                    // Если last_item пуст или удален, берем первый доступный
+                    if (!last_item || !last_item.parent().length) {
+                        last_item = comp.html.find('.selector').first();
+                    }
+                    
                     Lampa.Controller.collectionFocus(last_item, comp.html);
                 },
                 up: function() {
+                    // Если мы уже на кнопке сортировки -> открываем Head
                     if (last_item && last_item.hasClass('rezka-sort-btn')) {
                         Lampa.Controller.toggle('head');
                         return;
                     }
                     
+                    // Стандартное поведение Lampa
                     if (Navigator.canmove('up')) {
                         Navigator.move('up');
                     } else {
+                        // Если "вверх" идти некуда (первый ряд постеров) -> прыгаем на кнопку Сортировки
                         var sortBtn = comp.html.find('.rezka-sort-btn');
                         if (sortBtn.length) {
                             Navigator.focus(sortBtn);
@@ -618,7 +621,6 @@
             $('[data-action^="rezka_"]').remove();
             var menu = $('.menu .menu__list').eq(0);
             
-            // НОВЫЕ SVG ИКОНКИ ДЛЯ МЕНЮ
             var icon_watching = '<svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
             var icon_later    = '<svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
             var icon_watched  = '<svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
