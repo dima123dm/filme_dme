@@ -899,15 +899,23 @@
                         if (!rid) return;
 
                         var btnRef = myBtn;
-                        var buttonsRef = buttons;
 
                         function restoreFocus() {
                             setTimeout(function() {
                                 try {
-                                    Lampa.Controller.collectionSet(buttonsRef);
-                                    Lampa.Controller.collectionFocus(btnRef, buttonsRef);
-                                } catch(e) {}
-                            }, 200);
+                                    // Lampа сама восстанавливает контроллер текущей
+                                    // активности — это то же, что происходит при
+                                    // возврате с любой другой страницы на full.
+                                    var activity = Lampa.Activity.current();
+                                    if (activity && activity.resume) {
+                                        activity.resume();
+                                    } else {
+                                        Lampa.Activity.active();
+                                    }
+                                } catch(e) {
+                                    console.log('[Rezka] restoreFocus fallback', e);
+                                }
+                            }, 250);
                         }
 
                         var menuItems = [
