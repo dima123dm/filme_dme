@@ -268,8 +268,39 @@ if not os.path.exists("plugin"):
     os.makedirs("plugin")
 
 @app.get("/plugin/{file_path:path}")
-async def serve_plugin_no_cache(file_path: str):
-    response = FileResponse(f"plugin/{file_path}")
+async def serve_plugin_dynamic(file_path: str):
+    full_path = f"plugin/{file_path}"
+    
+    if not os.path.exists(full_path):
+        return Response(status_code=404)
+
+    # Если запрашивают mod.js, делаем подмену данных
+    if file_path == "mod.js":
+        try:
+            with open(full_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            # Получаем данные из .env
+            # rstrip("/") убирает слеш в конце ссылки, если он там есть, чтобы не было двойных //
+            public_url = os.getenv("PUBLIC_URL", "http://127.0.0.1:8080").rstrip("/")
+            tmdb_key = os.getenv("TMDB_API_KEY", "")
+            
+            # Подменяем метки на реальные значения
+            content = content.replace("__API_URL__", public_url)
+            content = content.replace("__TMDB_KEY__", tmdb_key)
+            
+            # Отдаем как Javascript
+            response = Response(content=content, media_type="application/javascript")
+            # Отключаем кэширование, чтобы изменения применялись сразу
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+        except Exception as e:
+            print(f"Error serving plugin file: {e}")
+            return Response(status_code=500)
+
+    # Для остальных файлов в папке plugin отдаем как есть
+    response = FileResponse(full_path)
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response

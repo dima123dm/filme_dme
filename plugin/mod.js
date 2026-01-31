@@ -1,8 +1,12 @@
 (function() {
     'use strict';
-
-    var MY_API_URL = 'http://filme.64.188.67.85.sslip.io:8080';
-    var TMDB_API_KEY = '4ef0d7355d9ffb5151e987764708ce96';
+    
+    // Python заменит __API_URL__ на реальный адрес из .env
+    var MY_API_URL = '__API_URL__'; 
+    var TMDB_API_KEY = '__TMDB_KEY__';
+    
+    console.log('[Rezka] Plugin loading...');
+    // ... остальной код без изменений ...
 
     console.log('[Rezka] Plugin loading full version (Server Sorting & SVG)...');
 
