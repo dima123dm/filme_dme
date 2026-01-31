@@ -4,7 +4,36 @@
     var MY_API_URL = '__API_URL__';
     var TMDB_API_KEY = '__TMDB_KEY__';
 
-    console.log('[Rezka] Plugin loading (Smart Navigation Edition)...');
+    console.log('[Rezka] Plugin loading (Smart Navigation Edition + Memory)...');
+
+    // --- ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ ДЛЯ ЗАПОМИНАНИЯ ВЫБОРА ---
+    var STORAGE_KEY = 'rezka_movie_choices';
+    
+    function getStoredChoices() {
+        try {
+            var data = localStorage.getItem(STORAGE_KEY);
+            return data ? JSON.parse(data) : {};
+        } catch(e) {
+            console.error('[Rezka] Storage read error:', e);
+            return {};
+        }
+    }
+    
+    function saveChoice(rezkaUrl, tmdbId, mediaType) {
+        try {
+            var choices = getStoredChoices();
+            choices[rezkaUrl] = { tmdb_id: tmdbId, media_type: mediaType, timestamp: Date.now() };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(choices));
+            console.log('[Rezka] ✅ Saved choice:', rezkaUrl, '→', tmdbId);
+        } catch(e) {
+            console.error('[Rezka] Storage write error:', e);
+        }
+    }
+    
+    function getChoice(rezkaUrl) {
+        var choices = getStoredChoices();
+        return choices[rezkaUrl] || null;
+    }
 
     function RezkaCategory(category) {
         var comp = {};
@@ -297,7 +326,7 @@
             card.on('hover:enter', function(e) {
                 if(e) e.preventDefault();
                 if(isModalOpen) return;
-                comp.search(titleRuClean, titleEn, year, mediaType);
+                comp.search(titleRuClean, titleEn, year, mediaType, item.url);
             });
 
             card.on('hover:long', function() {
@@ -307,8 +336,17 @@
             return card;
         };
 
-        // --- ПОИСК ---
-        comp.search = function(titleRu, titleEn, year, mediaType) {
+        // --- ПОИСК С ПАМЯТЬЮ ---
+        comp.search = function(titleRu, titleEn, year, mediaType, rezkaUrl) {
+            // Проверяем, есть ли сохраненный выбор
+            var savedChoice = rezkaUrl ? getChoice(rezkaUrl) : null;
+            
+            if (savedChoice) {
+                console.log('[Rezka] 🎯 Found saved choice:', savedChoice);
+                comp.openCard(savedChoice.tmdb_id, savedChoice.media_type);
+                return;
+            }
+            
             Lampa.Loading.start(function() {});
             var allResults = [];
             var seenIds = {};
@@ -318,6 +356,7 @@
                 queries.push(titleRu);
                 mediaType = 'multi'; 
                 year = '';
+                rezkaUrl = null;
             } else {
                 if (titleEn) queries.push(titleEn);
                 if (titleRu) queries.push(titleRu);
@@ -339,9 +378,17 @@
                         });
                     }
                     
-                    if (exactMatch) comp.openCard(exactMatch.id, mediaType === 'multi' ? exactMatch.media_type : mediaType);
-                    else if (allResults.length === 1) comp.openCard(allResults[0].id, mediaType === 'multi' ? allResults[0].media_type : mediaType);
-                    else comp.showSelection(allResults, mediaType);
+                    if (exactMatch) {
+                        var mt = mediaType === 'multi' ? exactMatch.media_type : mediaType;
+                        if (rezkaUrl) saveChoice(rezkaUrl, exactMatch.id, mt);
+                        comp.openCard(exactMatch.id, mt);
+                    } else if (allResults.length === 1) {
+                        var mt = mediaType === 'multi' ? allResults[0].media_type : mediaType;
+                        if (rezkaUrl) saveChoice(rezkaUrl, allResults[0].id, mt);
+                        comp.openCard(allResults[0].id, mt);
+                    } else {
+                        comp.showSelection(allResults, mediaType, rezkaUrl);
+                    }
                 }
             }
 
@@ -367,7 +414,7 @@
             });
         };
 
-        comp.showSelection = function(results, mediaType) {
+        comp.showSelection = function(results, mediaType, rezkaUrl) {
             if (isModalOpen) return; isModalOpen = true;
             var items = results.map(function(item) {
                 var yr = (item.release_date || item.first_air_date || '').substring(0, 4);
@@ -379,10 +426,17 @@
                     media_type: item.media_type || mediaType
                 };
             });
+            
             Lampa.Select.show({
                 title: 'Выберите вариант', items: items,
                 onSelect: function(s) { 
-                    isModalOpen = false; 
+                    isModalOpen = false;
+                    
+                    // СОХРАНЯЕМ ВЫБОР
+                    if (rezkaUrl) {
+                        saveChoice(rezkaUrl, s.tmdb_id, s.media_type);
+                    }
+                    
                     comp.openCard(s.tmdb_id, s.media_type); 
                     Lampa.Controller.toggle('rezka');
                 },
@@ -405,6 +459,12 @@
             var items = [];
             
             items.push({ title: '🔍 Найти в TMDB', value: 'manual_search' });
+            
+            // Проверяем, есть ли сохраненный выбор
+            var savedChoice = getChoice(item.url);
+            if (savedChoice) {
+                items.push({ title: '🔄 Сменить выбор фильма', value: 'change_choice' });
+            }
 
             if (isTv) items.push({ title: '📝 Отметки серий', value: 'episodes' });
             if (category !== 'watching') items.push({ title: '▶ В Смотрю', value: 'move_watching' });
@@ -423,6 +483,20 @@
                         var ruName = item.title.replace(/\s*\(\d{4}\)/, '').split('/')[0].trim();
                         comp.search(ruName);
                         Lampa.Controller.toggle('rezka');
+                    } else if (sel.value === 'change_choice') {
+                        // Удаляем сохраненный выбор и запускаем поиск заново
+                        comp.forgetChoice(item.url);
+                        var rawTitle = item.title || '';
+                        var yearMatch = rawTitle.match(/\((\d{4})\)/);
+                        var year = yearMatch ? yearMatch[1] : '';
+                        var titleNoYear = rawTitle.replace(/\s*\(\d{4}\)/, '').trim();
+                        var titleRu = titleNoYear.split('/')[0].trim();
+                        var titleEn = (titleNoYear.split('/')[1] || '').trim();
+                        var titleRuClean = titleRu.split(':')[0].trim();
+                        var isTv = /\/series\/|\/cartoons\//.test(item.url || '');
+                        var mediaType = isTv ? 'tv' : 'movie';
+                        comp.search(titleRuClean, titleEn, year, mediaType, item.url);
+                        Lampa.Controller.toggle('rezka');
                     } else {
                         comp.action(sel.value, item);
                     }
@@ -432,6 +506,20 @@
                     Lampa.Controller.toggle('rezka');
                 }
             });
+        };
+
+        comp.forgetChoice = function(rezkaUrl) {
+            try {
+                var choices = getStoredChoices();
+                if (choices[rezkaUrl]) {
+                    delete choices[rezkaUrl];
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(choices));
+                    console.log('[Rezka] 🗑️ Forgotten choice for:', rezkaUrl);
+                    Lampa.Noty.show('Выбор сброшен');
+                }
+            } catch(e) {
+                console.error('[Rezka] Error forgetting choice:', e);
+            }
         };
 
         // --- СЕРИИ ---
@@ -564,28 +652,22 @@
                     Lampa.Controller.collectionFocus(last_item, comp.html);
                 },
                 up: function() {
-                    // ЕСЛИ УЖЕ НА КНОПКЕ СОРТИРОВКИ -> ВЫХОДИМ В HEAD
                     if (last_item && $(last_item).hasClass('rezka-sort-btn')) {
                         Lampa.Controller.toggle('head');
                         return;
                     }
 
-                    // --- ИСПРАВЛЕНИЕ: ОПРЕДЕЛЯЕМ ПЕРВЫЙ РЯД ПО ПОЗИЦИИ ---
                     var cards = comp.html.find('.rezka-card');
                     if (cards.length === 0) {
                         Lampa.Controller.toggle('head');
                         return;
                     }
 
-                    // Получаем Y-позицию первой карточки
                     var firstCardTop = cards.first().offset().top;
                     var currentCardTop = $(last_item).offset().top;
-                    
-                    // Если разница меньше 20px - мы в первом ряду
                     var isFirstRow = Math.abs(currentCardTop - firstCardTop) < 20;
 
                     if (isFirstRow) {
-                        // Мы в первом ряду - переходим на кнопку сортировки
                         var sortBtn = comp.html.find('.rezka-sort-btn');
                         if (sortBtn.length) {
                             Lampa.Controller.collectionFocus(sortBtn, comp.html);
@@ -593,11 +675,9 @@
                             Lampa.Controller.toggle('head');
                         }
                     } else {
-                        // Мы НЕ в первом ряду - стандартная навигация вверх
                         if (Navigator.canmove('up')) {
                             Navigator.move('up');
                         } else {
-                            // Если не можем двигаться вверх, переходим на кнопку сортировки
                             var sortBtnFallback = comp.html.find('.rezka-sort-btn');
                             if (sortBtnFallback.length) {
                                 Lampa.Controller.collectionFocus(sortBtnFallback, comp.html);
@@ -620,15 +700,12 @@
         comp.resume = function() {
             console.log('[Rezka] ✅ RESUME called');
             
-            // Небольшая задержка для стабильности UI
             setTimeout(function() {
-                // Проверяем существование элементов
                 if (!comp.html || !comp.html.length) {
                     console.log('[Rezka] ❌ HTML not found');
                     return;
                 }
 
-                // Ищем валидный элемент
                 var target = null;
                 
                 if (last_item && $(last_item).length && $(last_item).is(':visible') && $(last_item).parent().length) {
@@ -643,7 +720,6 @@
                 }
 
                 if (target && target.length) {
-                    // КРИТИЧЕСКИ ВАЖНО: правильная последовательность
                     Lampa.Controller.collectionSet(comp.html);
                     Lampa.Controller.collectionFocus(target, comp.html);
                     Lampa.Controller.toggle('rezka');
@@ -677,7 +753,6 @@
             Lampa.Component.add(name, function() {
                 var c = new RezkaCategory(category);
                 
-                // ВАЖНО: привязываем resume к lifecycle
                 c.activity_resume = function() { 
                     if (c.resume) c.resume(); 
                 };
@@ -709,7 +784,6 @@
             });
         }, 1000);
 
-        // Слушатель активности
         Lampa.Listener.follow('activity', function(e) {
             if (e.type === 'active' && e.component.indexOf('rezka_') === 0) {
                 console.log('[Rezka] Activity active:', e.component);

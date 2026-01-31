@@ -8,6 +8,48 @@ let allLoadedItems = [];
 // Текущий метод сортировки (по умолчанию 'added')
 let currentSort = 'added';
 
+// --- НОВОЕ: Состояние библиотеки (для подсчета и проверки наличия) ---
+let libraryState = {
+    watching: new Set(),
+    later: new Set(),
+    watched: new Set(),
+    counts: { watching: 0, later: 0, watched: 0 }
+};
+
+// Функция обновления состояния библиотеки (загружает ID всех элементов)
+async function updateLibraryState() {
+    try {
+        // Загружаем списки параллельно
+        const [w, l, a] = await Promise.all([
+            fetch('/api/watching?sort=added').then(r => r.json()),
+            fetch('/api/later?sort=added').then(r => r.json()),
+            fetch('/api/watched?sort=added').then(r => r.json())
+        ]);
+
+        libraryState.watching = new Set(w.map(i => String(i.id)));
+        libraryState.later = new Set(l.map(i => String(i.id)));
+        libraryState.watched = new Set(a.map(i => String(i.id)));
+
+        libraryState.counts.watching = w.length;
+        libraryState.counts.later = l.length;
+        libraryState.counts.watched = a.length;
+
+        updateTabCounts();
+    } catch (e) {
+        console.error("Failed to update library state", e);
+    }
+}
+
+function updateTabCounts() {
+    const setTxt = (id, count) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = count > 0 ? `(${count})` : '';
+    };
+    setTxt('cnt-watching', libraryState.counts.watching);
+    setTxt('cnt-later', libraryState.counts.later);
+    setTxt('cnt-watched', libraryState.counts.watched);
+}
+
 // Функция смены сортировки через <select>
 function changeSort(val) {
     currentSort = val;
@@ -90,6 +132,9 @@ async function loadGrid(cat) {
         allLoadedItems = data;
         renderSortedGrid();
         
+        // Обновляем общие счетчики (вдруг что-то изменилось на сервере)
+        updateLibraryState(); 
+
     } catch (e) {
         console.error(e);
         grid.innerHTML = '<div style="grid-column:span 2; text-align:center;">Ошибка соединения</div>';
@@ -106,13 +151,16 @@ async function openDetails(url, title, poster) {
     document.getElementById('det-title').innerText = title;
     document.getElementById('det-controls').style.display = 'none';
     
-    // --- ВОТ ЭТОГО НЕ БЫЛО ИЛИ НЕ РАБОТАЛО ---
+    // Сброс бейджа статуса
+    const statusBadge = document.getElementById('det-status-badge');
+    statusBadge.style.display = 'none';
+    statusBadge.innerText = '';
+    
     // Устанавливаем ссылку для кнопки "На сайте"
     const siteLink = document.getElementById('det-site-link');
     if (siteLink) {
-        siteLink.href = url; // url теперь абсолютный благодаря rezka_client.py
+        siteLink.href = url;
     }
-    // -----------------------------------------
     
     const franchiseContainer = document.getElementById('det-franchises');
     if (franchiseContainer) franchiseContainer.innerHTML = '';
@@ -128,6 +176,23 @@ async function openDetails(url, title, poster) {
         if (data.post_id) {
             currentPostId = data.post_id;
             document.getElementById('det-controls').style.display = 'flex';
+            
+            // --- НОВОЕ: Проверка статуса и показ бейджа ---
+            const pid = String(currentPostId);
+            if (libraryState.watching.has(pid)) {
+                statusBadge.innerText = 'В СМОТРЮ';
+                statusBadge.style.background = 'rgba(0, 122, 255, 0.9)';
+                statusBadge.style.display = 'block';
+            } else if (libraryState.later.has(pid)) {
+                statusBadge.innerText = 'В ПОЗЖЕ';
+                statusBadge.style.background = 'rgba(255, 149, 0, 0.9)';
+                statusBadge.style.display = 'block';
+            } else if (libraryState.watched.has(pid)) {
+                statusBadge.innerText = 'В АРХИВЕ';
+                statusBadge.style.background = 'rgba(52, 199, 89, 0.9)';
+                statusBadge.style.display = 'block';
+            }
+            // ----------------------------------------------
         }
         if (data.poster) document.getElementById('det-img').src = data.poster;
         
@@ -172,8 +237,15 @@ async function openDetails(url, title, poster) {
                 data.seasons[s].forEach(ep => {
                     const row = document.createElement('div');
                     row.className = `ep-row ${ep.watched ? 'watched' : ''}`;
+                    
+                    // --- НОВОЕ: Отображение даты ---
+                    const dateHtml = ep.date ? `<div class="ep-date">${ep.date}</div>` : '';
+                    
                     row.innerHTML = `
-                        <span style="flex:1; padding-right:10px;">${ep.title}</span>
+                        <div class="ep-info">
+                            <span>${ep.title}</span>
+                            ${dateHtml}
+                        </div>
                         <div class="check ${ep.watched ? 'active' : ''}" onclick="toggle('${ep.global_id}', this)"></div>
                     `;
                     row.querySelector('.check').rowElement = row;
@@ -203,6 +275,8 @@ async function moveMovie(category) {
     });
     alert('Перенесено!');
     closeDetails();
+    // Обновляем состояние и сетку
+    await updateLibraryState();
     loadGrid(currentCategory);
 }
 
@@ -219,6 +293,7 @@ async function deleteMovie() {
     });
     alert('Удалено!');
     closeDetails();
+    await updateLibraryState();
     loadGrid(currentCategory);
 }
 
@@ -269,18 +344,35 @@ function doSearch(val) {
         const data = await res.json();
         const list = document.getElementById('search-results');
         list.innerHTML = '';
+        
         data.forEach(item => {
             const div = document.createElement('div');
             div.className = 'search-item';
             
+            // --- НОВОЕ: Проверка на наличие в категориях ---
+            const itemIdStr = String(item.id);
+            let statusBadge = '';
+            
+            if (libraryState.watching.has(itemIdStr)) {
+                statusBadge = '<span class="search-status-exists">В Смотрю</span>';
+            } else if (libraryState.later.has(itemIdStr)) {
+                statusBadge = '<span class="search-status-exists" style="color:#ff9500; background:rgba(255,149,0,0.15)">В Позже</span>';
+            } else if (libraryState.watched.has(itemIdStr)) {
+                statusBadge = '<span class="search-status-exists" style="color:#34c759; background:rgba(52,199,89,0.15)">В Архиве</span>';
+            }
+            // ----------------------------------------------
+
             let titleHTML = item.title || 'Без названия';
             
             div.innerHTML = `
-                <div class="search-title">${titleHTML}</div>
+                <div class="search-header">
+                    <div class="search-title">${titleHTML}</div>
+                    ${statusBadge}
+                </div>
                 <div class="search-actions">
-                    <button class="btn-action btn-watch" onclick="addFav('${item.id}', 'watching')">+ Смотрю</button>
-                    <button class="btn-action btn-later" onclick="addFav('${item.id}', 'later')">+ Позже</button>
-                    <button class="btn-action btn-done" onclick="addFav('${item.id}', 'watched')">✔ Архив</button>
+                    <button class="btn-watch-outline" onclick="addFav('${item.id}', 'watching')">+ Смотрю</button>
+                    <button class="btn-later-outline" onclick="addFav('${item.id}', 'later')">+ Позже</button>
+                    <button class="btn-done-outline" onclick="addFav('${item.id}', 'watched')">✔ Архив</button>
                 </div>
             `;
             list.appendChild(div);
@@ -306,6 +398,9 @@ async function addFav(id, cat) {
         const data = await res.json();
         if (data.success) {
             alert('Добавлено!');
+            // Обновляем библиотеку, чтобы статус обновился
+            await updateLibraryState();
+            // Если мы в поиске, можно перезапустить поиск, но проще оставить как есть
         } else {
             alert('Ошибка добавления');
         }
@@ -316,3 +411,5 @@ async function addFav(id, cat) {
 
 // Инициализация
 loadGrid('watching');
+// Загружаем состояние библиотеки (счетчики и ID для поиска)
+updateLibraryState();

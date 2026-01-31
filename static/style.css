@@ -4,7 +4,7 @@ body {
     color: var(--tg-theme-text-color, #fff);
     margin: 0;
     padding: 0;
-    padding-bottom: 100px; /* Увеличил отступ, чтобы контент не прилипал к меню */
+    padding-bottom: 100px;
     -webkit-tap-highlight-color: transparent;
     overflow-x: hidden;
 }
@@ -40,7 +40,6 @@ body {
 /* --- СЕТКА ФИЛЬМОВ --- */
 .grid {
     display: grid;
-    /* ИСПРАВЛЕНО: Две колонки во всю ширину, карточки будут большими */
     grid-template-columns: 1fr 1fr;
     gap: 15px;
     padding: 15px;
@@ -48,7 +47,7 @@ body {
 
 .card {
     position: relative;
-    border-radius: 10px; /* Чуть скруглил углы */
+    border-radius: 10px;
     overflow: hidden;
     background: #202020;
     cursor: pointer;
@@ -70,7 +69,7 @@ body {
     top: 8px; left: 8px;
     background: rgba(0,0,0,0.85);
     color: #fff;
-    font-size: 11px; /* Чуть крупнее шрифт */
+    font-size: 11px;
     padding: 4px 7px;
     border-radius: 6px;
     backdrop-filter: blur(4px);
@@ -82,7 +81,7 @@ body {
     top: 8px; right: 8px;
     background: #d2a028;
     color: #000;
-    font-size: 11px; /* Чуть крупнее шрифт */
+    font-size: 11px;
     font-weight: 800;
     padding: 3px 6px;
     border-radius: 4px;
@@ -91,12 +90,12 @@ body {
 }
 
 .card-content {
-    padding: 12px; /* Больше отступы внутри карточки */
+    padding: 12px;
     display: block;
 }
 
 .card-title {
-    font-size: 14px; /* Крупнее название */
+    font-size: 14px;
     font-weight: 600;
     margin-bottom: 4px;
     white-space: nowrap;
@@ -135,33 +134,73 @@ body {
     background: #202020;
     margin-top: 10px;
     padding: 15px;
-    border-radius: 10px;
+    border-radius: 12px; /* Более скругленные */
+    display: flex;
+    flex-direction: column; /* Вертикальная компоновка для красоты */
+    gap: 10px;
+}
+
+.search-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
+
 .search-title {
     font-weight: bold;
-    font-size: 14px;
-    flex: 1;
-    margin-right: 10px;
+    font-size: 15px;
     color: #fff;
 }
-.search-actions button {
-    display: block;
+
+.search-status-exists {
+    font-size: 12px;
+    color: #34c759;
+    background: rgba(52, 199, 89, 0.15);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+/* Обновленные кнопки поиска */
+.search-actions {
+    display: flex;
+    gap: 8px;
     width: 100%;
-    margin-bottom: 5px;
-    padding: 6px 10px;
-    font-size: 11px;
-    border: none;
-    border-radius: 6px;
+}
+
+.search-actions button {
+    flex: 1;
+    padding: 10px;
+    font-size: 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
     cursor: pointer;
     color: #fff;
-    font-weight: bold;
+    font-weight: 600;
+    background: #333;
+    transition: all 0.2s;
 }
-.btn-watch { background: #007aff; }
-.btn-later { background: #ff9500; }
-.btn-done { background: #34c759; }
+
+.btn-watch-outline {
+    background: transparent !important;
+    border-color: #007aff !important;
+    color: #007aff !important;
+}
+.btn-watch-outline:active { background: rgba(0, 122, 255, 0.2) !important; }
+
+.btn-later-outline {
+    background: transparent !important;
+    border-color: #ff9500 !important;
+    color: #ff9500 !important;
+}
+.btn-later-outline:active { background: rgba(255, 149, 0, 0.2) !important; }
+
+.btn-done-outline {
+    background: transparent !important;
+    border-color: #34c759 !important;
+    color: #34c759 !important;
+}
+.btn-done-outline:active { background: rgba(52, 199, 89, 0.2) !important; }
 
 /* --- ДЕТАЛИ --- */
 #details {
@@ -172,7 +211,6 @@ body {
     overflow-y: auto;
     transform: translateY(100%);
     transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-    /* Добавляем отступ снизу, чтобы контент не обрезался */
     padding-bottom: 120px; 
 }
 #details.open { transform: translateY(0); }
@@ -180,7 +218,6 @@ body {
 .hero { 
     position: relative; 
     width: 100%; 
-    /* ИСПРАВЛЕНО: Фиксированная высота (40% экрана), чтобы не было огромным */
     height: 40vh; 
     min-height: 300px;
     padding-bottom: 0;
@@ -193,6 +230,22 @@ body {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, #000 100%);
 }
+
+/* Бейдж статуса в деталях (например "В Смотрю") */
+.hero-status-badge {
+    position: absolute;
+    top: 60px; right: 15px; /* Под кнопкой закрытия, справа */
+    background: rgba(0, 122, 255, 0.9);
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: bold;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    z-index: 210;
+}
+
 .hero-title {
     position: absolute; bottom: 20px; left: 20px; right: 20px;
     font-size: 24px; font-weight: bold; text-shadow: 0 2px 10px rgba(0,0,0,0.8);
@@ -230,6 +283,9 @@ body {
     font-size: 13px;
     cursor: pointer;
 }
+.btn-watch { background: #007aff; }
+.btn-later { background: #ff9500; }
+.btn-done { background: #34c759; }
 .btn-delete { background: #ff3b30; }
 
 /* СПИСОК ЭПИЗОДОВ */
@@ -245,6 +301,20 @@ body {
     border-bottom: 1px solid #222;
 }
 .ep-row.watched { color: #666; }
+
+.ep-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding-right: 10px;
+}
+.ep-date {
+    font-size: 11px;
+    color: #555;
+    margin-top: 3px;
+}
+.ep-row.watched .ep-date { color: #444; }
+
 .check {
     width: 24px; height: 24px;
     border: 2px solid #444;
@@ -288,7 +358,6 @@ body {
 /* --- НИЖНЕЕ МЕНЮ (TAB BAR) --- */
 .tab-bar {
     position: fixed; bottom: 0; left: 0; right: 0;
-    /* ИСПРАВЛЕНО: Убрал фиксированную высоту и добавил отступы для iPhone */
     height: auto;
     min-height: 60px;
     background: rgba(20,20,20,0.95);
@@ -298,7 +367,6 @@ body {
     justify-content: space-around;
     align-items: center;
     padding-top: 10px;
-    /* Добавляем безопасную зону + 15px, чтобы полоска iPhone не перекрывала */
     padding-bottom: calc(15px + env(safe-area-inset-bottom));
     z-index: 90;
 }
@@ -313,3 +381,12 @@ body {
 }
 .tab-btn.active { color: #fff; }
 .tab-icon svg { width: 22px; height: 22px; }
+
+/* Бейджи количества в таббаре */
+.count-badge {
+    color: #888;
+    font-size: 10px;
+    margin-left: 2px;
+    font-weight: normal;
+}
+.tab-btn.active .count-badge { color: #ccc; }

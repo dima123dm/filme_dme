@@ -88,6 +88,14 @@ class RezkaClient:
                 if not td_1:
                     continue
                 text = td_1.get_text(strip=True)
+                
+                # --- ИЗМЕНЕНИЕ: Парсинг даты ---
+                date_text = ""
+                td_date = tr.find(class_="td-3") # Обычно дата в 3-й колонке
+                if td_date:
+                    date_text = td_date.get_text(strip=True)
+                # -------------------------------
+
                 s_id = "1"
                 e_id = "1"
                 match = re.search(r"(\d+)\s*сезон\s*(\d+)\s*серия", text, re.IGNORECASE)
@@ -134,6 +142,7 @@ class RezkaClient:
                             "episode": e_id,
                             "global_id": global_id,
                             "watched": is_watched,
+                            "date": date_text # <-- Добавляем дату в структуру
                         }
                     )
         return seasons
@@ -188,6 +197,7 @@ class RezkaClient:
                         "episode": e_id,
                         "global_id": global_id,
                         "watched": is_watched,
+                        "date": "" # <-- Пустая дата для совместимости
                     }
                 except Exception:
                     continue
@@ -357,6 +367,10 @@ class RezkaClient:
                                     p_ep["watched"] = True
                                 if t_ep.get("global_id"):
                                     p_ep["global_id"] = t_ep["global_id"]
+                                # --- ИЗМЕНЕНИЕ: Копируем дату ---
+                                if t_ep.get("date"):
+                                    p_ep["date"] = t_ep["date"]
+                                # --------------------------------
                                 break
                         if not found:
                             final_seasons_dict[s_id].append(t_ep)

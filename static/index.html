@@ -32,6 +32,7 @@
         <div class="hero">
             <div class="hero-gradient"></div>
             <img id="det-img" src="">
+            <div id="det-status-badge" class="hero-status-badge" style="display: none;"></div>
             <div class="hero-title" id="det-title"></div>
         </div>
 
@@ -53,19 +54,19 @@
             <span class="tab-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
             </span>
-            Смотрю
+            <span>Смотрю <span id="cnt-watching" class="count-badge"></span></span>
         </button>
         <button class="tab-btn" onclick="switchTab('later', this)">
             <span class="tab-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
             </span>
-            Позже
+            <span>Позже <span id="cnt-later" class="count-badge"></span></span>
         </button>
         <button class="tab-btn" onclick="switchTab('watched', this)">
             <span class="tab-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
             </span>
-            Архив
+            <span>Архив <span id="cnt-watched" class="count-badge"></span></span>
         </button>
         <button class="tab-btn" onclick="openSearch(this)">
             <span class="tab-icon">
