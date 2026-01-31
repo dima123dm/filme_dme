@@ -763,22 +763,16 @@
                 
                 if (last_item && $(last_item).length && $(last_item).is(':visible') && $(last_item).parent().length) {
                     target = last_item;
-                    console.log('[Rezka] ✓ Using last_item');
                 } else {
                     target = comp.html.find('.rezka-card.selector').first();
                     if (!target.length) {
                         target = comp.html.find('.rezka-sort-btn').first();
                     }
-                    console.log('[Rezka] ✓ Using fallback');
                 }
 
                 if (target && target.length) {
-                    Lampa.Controller.collectionSet(comp.html);
-                    Lampa.Controller.collectionFocus(target, comp.html);
-                    Lampa.Controller.toggle('rezka');
-                    
                     last_item = target;
-                    console.log('[Rezka] ✅ Control restored');
+                    comp.start();
                 } else {
                     console.log('[Rezka] ❌ No valid target found');
                 }
