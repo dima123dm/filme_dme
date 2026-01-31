@@ -36,10 +36,8 @@ class RezkaClient:
         self.origin: str = base_url or os.getenv("REZKA_DOMAIN", "https://hdrezka.me")
 
     def auth(self) -> bool:
-        """Авторизация. Если уже залогинены, делаем ping-проверку (опционально) или просто возвращаем True."""
         if self.is_logged_in:
             return True
-            
         try:
             print("🔑 Попытка авторизации...")
             headers = {"X-Requested-With": "XMLHttpRequest"}
@@ -62,9 +60,6 @@ class RezkaClient:
             print(f"❌ Ошибка подключения при авторизации: {e}")
         return False
 
-    # ------------------------
-    # Внутренние методы парсинга
-    # ------------------------
     def _is_watched_check(self, element: Any) -> bool:
         if not element:
             return False
@@ -89,12 +84,12 @@ class RezkaClient:
                     continue
                 text = td_1.get_text(strip=True)
                 
-                # --- ИЗМЕНЕНИЕ: Парсинг даты ---
+                # --- ИЗМЕНЕНИЕ: Парсинг даты из 4-й колонки ---
                 date_text = ""
-                td_date = tr.find(class_="td-3") # Обычно дата в 3-й колонке
+                td_date = tr.find(class_="td-4")  # <-- ИСПРАВЛЕНО: td-4
                 if td_date:
                     date_text = td_date.get_text(strip=True)
-                # -------------------------------
+                # ----------------------------------------------
 
                 s_id = "1"
                 e_id = "1"
@@ -142,7 +137,7 @@ class RezkaClient:
                             "episode": e_id,
                             "global_id": global_id,
                             "watched": is_watched,
-                            "date": date_text # <-- Добавляем дату в структуру
+                            "date": date_text  # <-- Пробрасываем дату
                         }
                     )
         return seasons
@@ -197,7 +192,7 @@ class RezkaClient:
                         "episode": e_id,
                         "global_id": global_id,
                         "watched": is_watched,
-                        "date": "" # <-- Пустая дата для совместимости
+                        "date": "" 
                     }
                 except Exception:
                     continue
@@ -233,25 +228,19 @@ class RezkaClient:
             elif soup.find(id="post_id"):
                 post_id = soup.find(id="post_id").get("value")
             
-            # --- ПАРСИНГ ПЕРЕВОДЧИКОВ (ОЗВУЧЕК) ---
             translators = []
             translator_items = soup.find_all(class_="b-translator__item")
             for t_item in translator_items:
                 t_id = t_item.get("data-translator_id")
-                # Название озвучки иногда в title, иногда в тексте
                 t_name = t_item.get("title") or t_item.get_text(strip=True)
-                # Картинка страны (флаг)
                 img = t_item.find("img")
                 if img:
-                    # Если есть картинка, текст может быть внутри или рядом
                     t_name = t_item.get_text(strip=True) or t_item.get("title")
                 
                 if t_id:
                     translators.append({"id": t_id, "name": t_name})
             
-            # Если нет списка переводчиков, но есть один дефолтный
             if not translators and post_id:
-                # Пытаемся найти активный ID
                 active_t = None
                 match_tid = re.search(r'["\']translator_id["\']\s*:\s*(\d+)', html_text)
                 if match_tid: active_t = match_tid.group(1)
@@ -278,13 +267,10 @@ class RezkaClient:
                         f_url = urljoin(self.origin, f_url)
                     franchises = self.get_franchise_items(f_url)
 
-            # --- СБОР СЕРИЙ ДЛЯ ТЕКУЩЕЙ (ДЕФОЛТНОЙ) ОЗВУЧКИ ---
             table_seasons = self._parse_schedule_table(soup)
             all_unique_episodes: Dict[str, Dict[str, Any]] = {}
             
-            # Используем существующую логику сбора для дефолтной страницы
             if post_id:
-                # ... (старый код сбора серий, оставлен для обратной совместимости API)
                 translator_id = None
                 match_tid = re.search(r'["\']translator_id["\']\s*:\s*(\d+)', html_text)
                 if match_tid:
@@ -294,7 +280,6 @@ class RezkaClient:
                     if active:
                         translator_id = active.get("data-translator_id")
                 
-                # Если переводчики есть, но активный не найден, берем первый
                 if not translator_id and translators:
                     translator_id = translators[0]["id"]
 
@@ -389,48 +374,28 @@ class RezkaClient:
                 "poster": hq_poster, 
                 "post_id": post_id, 
                 "franchises": franchises,
-                "translators": translators  # <-- Добавили список озвучек
+                "translators": translators
             }
         except Exception as e:
             return {"error": str(e)}
 
-    # ----------------------------------------------------
-    # НОВЫЙ МЕТОД: Получение серий для конкретной озвучки
-    # ----------------------------------------------------
     def get_episodes_for_translator(self, post_id: str, translator_id: str) -> Dict[str, Any]:
-        """
-        Запрашивает список серий для конкретного translator_id.
-        """
         if not self.auth():
             return {}
-        
         all_unique_episodes: Dict[str, Dict[str, Any]] = {}
-        
-        # Запрашиваем информацию (пытаемся угадать, есть ли сезоны или все вместе)
-        # Обычно проще всего запросить action="get_episodes" без указания сезона, 
-        # но если сезонов много, сайт может вернуть только табы.
-        
-        # Стратегия: Сначала пробуем получить общий список
         payload = {
             "id": post_id,
             "translator_id": translator_id,
             "action": "get_episodes"
         }
-        
         try:
             r = self.session.post(f"{self.origin}/ajax/get_cdn_series/", data=payload)
             data = r.json()
-            
             if not data.get("success"):
                 return {}
-
             html_content = data.get("episodes") or data.get("seasons")
-            
-            # Проверяем, вернул ли он список сезонов (data-tab_id) внутри
             season_ids = re.findall(r'data-tab_id=["\'](\d+)["\']', html_content)
-            
             if season_ids:
-                # Если есть сезоны, нужно пройтись по каждому
                 unique_seasons = sorted(list(set(season_ids)), key=lambda x: int(x) if x.isdigit() else 0)
                 for s_id in unique_seasons:
                     pl_season = {
@@ -446,14 +411,10 @@ class RezkaClient:
                         h_s = d_s.get("episodes") or d_s.get("seasons")
                         all_unique_episodes.update(self._parse_html_list(h_s, default_season=s_id))
             else:
-                # Если сезонов нет, парсим то что пришло
                 all_unique_episodes.update(self._parse_html_list(html_content))
-                
         except Exception as e:
             print(f"Error getting translator episodes: {e}")
             return {}
-
-        # Формируем красивый словарь seasons
         final_seasons: Dict[str, List[Dict[str, Any]]] = {}
         for _, ep_data in all_unique_episodes.items():
             s_id = ep_data["s_id"]
@@ -462,12 +423,8 @@ class RezkaClient:
             clean_ep = ep_data.copy()
             del clean_ep["s_id"]
             final_seasons[s_id].append(clean_ep)
-            
         return final_seasons
 
-    # ------------------------
-    # Работа с закладками
-    # ------------------------
     def get_category_items(self, cat_id: str) -> List[Dict[str, Any]]:
         return self.get_category_items_paginated(cat_id, max_pages=1)
 
@@ -502,36 +459,28 @@ class RezkaClient:
         for attempt in range(2):
             all_items: List[Dict[str, Any]] = []
             seen_ids: set[str] = set()
-            
             if not self.auth():
                 if attempt == 0:
                      self.is_logged_in = False
                      continue
                 return []
-                
             filter_param = "filter=added"
             if sort_by == "year":
                 filter_param = "filter=year"
             elif sort_by == "popular":
                 filter_param = "filter=popular"
-            
             success_fetch = False 
-            
             for page in range(1, max_pages + 1):
                 try:
                     url_page = f"{self.origin}/favorites/{cat_id}/"
                     if page > 1:
                         url_page = f"{url_page}page/{page}/"
-                    
                     url_page = f"{url_page}?{filter_param}"
-                    
                     r = self.session.get(url_page)
                     soup = BeautifulSoup(r.text, "html.parser")
                     items_page: List[Dict[str, Any]] = []
-                    
                     if soup.find("input", {"name": "login_name"}) or "Авторизация" in r.text:
                          break 
-
                     for item in soup.find_all(class_="b-content__inline_item"):
                         try:
                             item_id = item.get("data-id")
@@ -540,17 +489,14 @@ class RezkaClient:
                             link = item.find(class_="b-content__inline_item-link").find("a")
                             img = item.find(class_="b-content__inline_item-cover").find("img")
                             status = item.find(class_="info")
-                            
                             full_title = link.get_text(strip=True) if link else ""
                             year = ""
                             match_year = re.search(r'\((\d{4})\)', full_title)
                             if match_year:
                                 year = match_year.group(1)
-
                             raw_url = link.get("href") if link else ""
                             if raw_url and not raw_url.startswith("http"):
                                 raw_url = urljoin(self.origin, raw_url)
-
                             items_page.append(
                                 {
                                     "id": item_id,
@@ -564,7 +510,6 @@ class RezkaClient:
                             seen_ids.add(item_id)
                         except Exception:
                             continue
-                    
                     if items_page:
                         success_fetch = True
                         all_items.extend(items_page)
@@ -572,19 +517,15 @@ class RezkaClient:
                         if page == 1:
                             pass 
                         break 
-                        
                 except Exception as e:
                     print(f"ERROR Fetching page: {e}")
                     break
-            
             if all_items:
                 return all_items
-            
             if attempt == 0:
                 self.is_logged_in = False
             else:
                 return [] 
-
         return []
 
     def toggle_watch(self, global_id: str, referer: Optional[str] = None) -> bool:
@@ -712,7 +653,6 @@ class RezkaClient:
         items: List[Dict[str, Any]] = []
         if not franchise_url:
             return items
-        
         try:
             headers = {"Referer": self.origin}
             r = self.session.get(franchise_url, headers=headers)
@@ -734,18 +674,15 @@ class RezkaClient:
                         if title_container:
                             a_tag = title_container.find("a")
                             title = a_tag.get_text(strip=True) if a_tag else title_container.get_text(strip=True)
-                        
                         year_container = block.find("div", class_="td year")
                         if year_container:
                             info_text = year_container.get_text(strip=True)
-                        
                         year = ""
                         if info_text and re.match(r'\d{4}', info_text):
                             year = info_text.split()[0]
                         else:
                             match_year = re.search(r'\((\d{4})\)', title)
                             if match_year: year = match_year.group(1)
-
                         rating_container = block.find("div", class_="td rating")
                         if rating_container:
                             rating = rating_container.get_text(strip=True)
@@ -775,7 +712,6 @@ class RezkaClient:
                     except Exception:
                         continue
                 return items
-
             blocks = soup.find_all(class_="b-content__inline_item")
             if not blocks:
                 container = soup.find(class_="b-content__inline_items")
@@ -791,15 +727,12 @@ class RezkaClient:
                     url = link.get("href")
                     if url and not url.startswith("http"):
                         url = urljoin(self.origin, url)
-
                     item_id = block.get("data-id")
                     info = block.find(class_="misc")
                     misc_text = info.get_text(strip=True) if info else ""
-                    
                     year = ""
                     match_year = re.search(r'\((\d{4})\)', title)
                     if match_year: year = match_year.group(1)
-                    
                     img_wrap = block.find(class_="b-content__inline_item-cover")
                     img = img_wrap.find("img") if img_wrap else None
                     poster = img.get("src") if img else ""
