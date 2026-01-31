@@ -16,10 +16,11 @@ import time
 
 load_dotenv()
 
+# --- ИЗМЕНЕНО: Увеличил лимит страниц с 5 до 30 (хватит на ~1000+ фильмов) ---
 CAT_WATCHING = os.getenv("REZKA_CAT_WATCHING")
 CAT_LATER = os.getenv("REZKA_CAT_LATER")
 CAT_WATCHED = os.getenv("REZKA_CAT_WATCHED")
-MAX_PAGES = int(os.getenv("REZKA_PAGES", "5"))
+MAX_PAGES = int(os.getenv("REZKA_PAGES", "30")) 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -95,16 +96,22 @@ class DeleteRequest(BaseModel):
 def get_watching(sort: str = "added"):
     # Передаем параметр сортировки
     items = client.get_category_items_paginated(CAT_WATCHING, MAX_PAGES, sort_by=sort)
-    print(f"[API] 📋 Возвращаем {len(items)} элементов (sort={sort})")
+    print(f"[API] 📋 Смотрю: {len(items)} элементов (sort={sort})")
     return items
 
 @app.get("/api/later")
 def get_later(sort: str = "added"):
-    return client.get_category_items_paginated(CAT_LATER, MAX_PAGES, sort_by=sort)
+    items = client.get_category_items_paginated(CAT_LATER, MAX_PAGES, sort_by=sort)
+    # Добавил лог для отладки
+    print(f"[API] ⏳ Позже: {len(items)} элементов")
+    return items
 
 @app.get("/api/watched")
 def get_watched(sort: str = "added"):
-    return client.get_category_items_paginated(CAT_WATCHED, MAX_PAGES, sort_by=sort)
+    items = client.get_category_items_paginated(CAT_WATCHED, MAX_PAGES, sort_by=sort)
+    # Добавил лог для отладки
+    print(f"[API] ✅ Архив: {len(items)} элементов")
+    return items
 
 @app.get("/api/details")
 def get_details(url: str):
